@@ -1,0 +1,690 @@
+const router = require('express').Router();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const Actor = require('../models/Actor');
+const AuthOtp = require('../models/AuthOtp');
+const { sendDeviceRemovalEmail, sendOneTimePasswordEmail } = require('../utils/mailer');
+const {
+  EXPIRY_MINUTES,
+  MAX_ATTEMPTS: MAX_DEVICE_VERIFICATION_ATTEMPTS,
+  clearVerification,
+  createVerificationRequest,
+  isExpired,
+  isMatchingCode,
+  maskEmail,
+  maskPhone,
+} = require('../utils/deviceRemovalVerification');
+const {
+  MAX_OTP_ATTEMPTS,
+  OTP_EXPIRY_MINUTES,
+  createOtpRecord,
+  isMatchingOtp,
+  isOtpExpired,
+} = require('../utils/oneTimePassword');
+const { sendDeviceRemovalWhatsapp } = require('../utils/whatsapp');
+const {
+  buildIdentifierQueries,
+  isPhoneProxyEmail,
+  isValidEmail,
+  normalizeEmail,
+  normalizePhone,
+  publicContact,
+  sanitizeEmail,
+} = require('../utils/authContact');
+const { buildDeviceSnapshot } = require('../utils/deviceContext');
+
+const SECRET = process.env.JWT_SECRET;
+const MAX_DEVICES = 2;
+const MIN_PASSWORD_LENGTH = 6;
+
+const signToken = (user, deviceId) =>
+  jwt.sign({ id: user._id, role: user.role, deviceId }, SECRET, { expiresIn: '30d' });
+
+const safeUser = (user, extra = {}) => ({
+  id: user._id,
+  name: user.name,
+  email: sanitizeEmail(user.email),
+  phone: user.phone || null,
+  contact: publicContact(user),
+  role: user.role,
+  subscription: user.subscription || { plan: 'free', active: false },
+  ...extra,
+});
+
+function normalizeRole(role) {
+  const allowed = ['author', 'actor'];
+  return allowed.includes(role) ? role : 'viewer';
+}
+
+function hasStrongEnoughPassword(password) {
+  return String(password || '').length >= MIN_PASSWORD_LENGTH;
+}
+
+function getOtpErrorMessage(purpose) {
+  if (purpose === 'register') {
+    return {
+      notFound: 'No sign-up verification code was found. Request a new code to continue.',
+      expired: 'Your sign-up code has expired. Request a new one and try again.',
+      tooManyAttempts: 'Too many failed sign-up attempts. Request a new code.',
+      invalid: 'The sign-up code is incorrect.',
+    };
+  }
+
+  return {
+    notFound: 'No password reset code was found. Request a new code to continue.',
+    expired: 'Your password reset code has expired. Request a new one and try again.',
+    tooManyAttempts: 'Too many failed reset attempts. Request a new code.',
+    invalid: 'The password reset code is incorrect.',
+  };
+}
+
+async function findUserByIdentifier(identifier) {
+  const queries = buildIdentifierQueries(identifier);
+  if (!queries.length) return null;
+  if (queries.length === 1) return User.findOne(queries[0]);
+  return User.findOne({ $or: queries });
+}
+
+function serializeDevices(user, currentDeviceId) {
+  return user.devices.map((device) => ({
+    deviceId: device.deviceId,
+    deviceName: device.deviceName,
+    lastSeen: device.lastSeen,
+    locationLabel: device.location?.label || null,
+    locationSource: device.location?.source || 'unknown',
+    isCurrent: device.deviceId === currentDeviceId,
+  }));
+}
+
+function getRemovalContacts(user) {
+  const email = sanitizeEmail(user.email);
+  const phone = normalizePhone(user.phone);
+
+  if (!email || !phone) {
+    return null;
+  }
+
+  return { email, phone };
+}
+
+async function resolveDeviceRemovalUser(req) {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  if (token) {
+    const decoded = jwt.verify(token, SECRET);
+    const user = await User.findById(decoded.id);
+    return { user, currentDeviceId: decoded.deviceId || null };
+  }
+
+  const { identifier, email, phone, password } = req.body;
+  const lookupValue = identifier || email || phone;
+  const user = await findUserByIdentifier(lookupValue);
+
+  if (!user || !(await bcrypt.compare(password, user.password))) {
+    return null;
+  }
+
+  return { user, currentDeviceId: null };
+}
+
+async function saveOtp({ purpose, email, payload }) {
+  const { code, otp } = createOtpRecord({ purpose, email, payload });
+
+  await AuthOtp.findOneAndUpdate(
+    { purpose, email },
+    otp,
+    { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+  );
+
+  return code;
+}
+
+async function incrementOtpAttempts(record, tooManyAttemptsMessage) {
+  record.attempts += 1;
+
+  if (record.attempts >= MAX_OTP_ATTEMPTS) {
+    await AuthOtp.deleteOne({ _id: record._id });
+    return tooManyAttemptsMessage;
+  }
+
+  await record.save();
+  return null;
+}
+
+router.post('/register/request-otp', async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      phone,
+      password,
+      role,
+      deviceId,
+      deviceName,
+      deviceLocation,
+      deviceMeta,
+    } = req.body;
+
+    const trimmedName = String(name || '').trim();
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPhone = normalizePhone(phone);
+
+    if (!trimmedName) {
+      return res.status(400).json({ message: 'Enter your full name.' });
+    }
+
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: 'Enter a valid email address to receive your sign-up code.' });
+    }
+
+    if (phone && !normalizedPhone) {
+      return res.status(400).json({ message: 'Enter a valid Rwanda mobile number like +2507XXXXXXXX.' });
+    }
+
+    if (!hasStrongEnoughPassword(password)) {
+      return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
+
+    if (await User.findOne({ email: normalizedEmail })) {
+      return res.status(400).json({ message: 'Email already in use.' });
+    }
+
+    if (normalizedPhone && await User.findOne({ phone: normalizedPhone })) {
+      return res.status(400).json({ message: 'Phone number already in use.' });
+    }
+
+    const resolvedRole = normalizeRole(role);
+    const resolvedDeviceId = deviceId || `dev_${Date.now()}`;
+    const deviceSnapshot = buildDeviceSnapshot(req, {
+      deviceName,
+      deviceLocation,
+      deviceMeta,
+    });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const code = await saveOtp({
+      purpose: 'register',
+      email: normalizedEmail,
+      payload: {
+        name: trimmedName,
+        email: normalizedEmail,
+        phone: normalizedPhone || null,
+        passwordHash,
+        role: resolvedRole,
+        deviceId: resolvedDeviceId,
+        deviceSnapshot,
+      },
+    });
+
+    try {
+      await sendOneTimePasswordEmail({
+        to: normalizedEmail,
+        name: trimmedName,
+        code,
+        purpose: 'register',
+        expiresInMinutes: OTP_EXPIRY_MINUTES,
+      });
+    } catch (deliveryError) {
+      await AuthOtp.deleteOne({ purpose: 'register', email: normalizedEmail });
+      return res.status(500).json({
+        message: `Failed to send sign-up code. ${deliveryError.message}`,
+      });
+    }
+
+    res.json({
+      message: 'We sent a one-time password to your email. Enter it below to finish creating your account.',
+      maskedEmail: maskEmail(normalizedEmail),
+      expiresInMinutes: OTP_EXPIRY_MINUTES,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/register/verify-otp', async (req, res) => {
+  try {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const otp = String(req.body.otp || '').trim();
+    const errorMessages = getOtpErrorMessage('register');
+
+    if (!normalizedEmail || !otp) {
+      return res.status(400).json({ message: 'Enter the email address and sign-up code.' });
+    }
+
+    const pendingOtp = await AuthOtp.findOne({ purpose: 'register', email: normalizedEmail });
+    if (!pendingOtp) {
+      return res.status(400).json({ message: errorMessages.notFound });
+    }
+
+    if (isOtpExpired(pendingOtp)) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: errorMessages.expired });
+    }
+
+    if (pendingOtp.attempts >= MAX_OTP_ATTEMPTS) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(429).json({ message: errorMessages.tooManyAttempts });
+    }
+
+    if (!isMatchingOtp(otp, pendingOtp.codeHash)) {
+      const tooManyAttemptsMessage = await incrementOtpAttempts(pendingOtp, errorMessages.tooManyAttempts);
+      return res.status(400).json({
+        message: tooManyAttemptsMessage || errorMessages.invalid,
+      });
+    }
+
+    const payload = pendingOtp.payload || {};
+    if (!payload.name || !payload.passwordHash) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'This sign-up session is incomplete. Request a new code.' });
+    }
+
+    if (await User.findOne({ email: normalizedEmail })) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'Email already in use.' });
+    }
+
+    if (payload.phone && await User.findOne({ phone: payload.phone })) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'Phone number already in use.' });
+    }
+
+    const deviceId = payload.deviceId || `dev_${Date.now()}`;
+    const deviceSnapshot = payload.deviceSnapshot || buildDeviceSnapshot(req, {});
+    const accountEmail = payload.email || normalizedEmail;
+
+    const user = await User.create({
+      name: payload.name,
+      email: accountEmail,
+      phone: payload.phone || undefined,
+      password: payload.passwordHash,
+      role: normalizeRole(payload.role),
+      devices: [{ deviceId, ...deviceSnapshot }],
+    });
+
+    let actorId = null;
+    if (user.role === 'actor') {
+      const actor = await Actor.create({ name: user.name, userId: user._id });
+      actorId = actor._id;
+    }
+
+    await AuthOtp.deleteOne({ _id: pendingOtp._id });
+
+    const token = signToken(user, deviceId);
+    res.status(201).json({ token, deviceId, user: safeUser(user, { actorId }) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/register', (req, res) => {
+  res.status(410).json({
+    message: 'Registration now requires email verification. Request a sign-up code first.',
+  });
+});
+
+router.post('/login', async (req, res) => {
+  try {
+    const {
+      identifier,
+      email,
+      phone,
+      password,
+      deviceId,
+      deviceName,
+      deviceLocation,
+      deviceMeta,
+    } = req.body;
+    const lookupValue = identifier || email || phone;
+    const user = await findUserByIdentifier(lookupValue);
+
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    if (user.status === 'suspended') {
+      return res.status(403).json({ message: 'Your account has been suspended. Contact support.' });
+    }
+
+    const dId = deviceId || `dev_${Date.now()}`;
+    const deviceSnapshot = buildDeviceSnapshot(req, {
+      deviceName,
+      deviceLocation,
+      deviceMeta,
+    });
+    const existingDevice = user.devices.find((device) => device.deviceId === dId);
+
+    if (existingDevice) {
+      existingDevice.deviceName = deviceSnapshot.deviceName;
+      existingDevice.lastSeen = deviceSnapshot.lastSeen;
+      existingDevice.lastIp = deviceSnapshot.lastIp;
+      existingDevice.userAgent = deviceSnapshot.userAgent;
+      existingDevice.platform = deviceSnapshot.platform;
+      existingDevice.language = deviceSnapshot.language;
+      existingDevice.location = deviceSnapshot.location;
+    } else {
+      if (user.devices.length >= MAX_DEVICES) {
+        return res.status(403).json({
+          message: `This account is already registered on ${MAX_DEVICES} devices. Remove a device to continue.`,
+          devices: user.devices.map((device) => ({
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            lastSeen: device.lastSeen,
+            locationLabel: device.location?.label || null,
+          })),
+        });
+      }
+
+      user.devices.push({ deviceId: dId, ...deviceSnapshot });
+    }
+
+    await user.save();
+
+    let actorId = null;
+    if (user.role === 'actor') {
+      const actor = await Actor.findOne({ userId: user._id });
+      actorId = actor?._id || null;
+    }
+
+    const token = signToken(user, dId);
+    res.json({ token, deviceId: dId, user: safeUser(user, { actorId }) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/remove-device', (req, res) => {
+  res.status(403).json({
+    message: 'Device removal now requires email and WhatsApp verification. Request a verification code first.',
+  });
+});
+
+router.post('/devices/:deviceId/removal/request', async (req, res) => {
+  try {
+    const resolved = await resolveDeviceRemovalUser(req);
+    if (!resolved?.user) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    const { user, currentDeviceId } = resolved;
+    const targetDevice = user.devices.find((device) => device.deviceId === req.params.deviceId);
+    if (!targetDevice) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+
+    const contacts = getRemovalContacts(user);
+    if (!contacts) {
+      return res.status(400).json({
+        message: 'Device removal requires both a verified email address and a WhatsApp-enabled phone number on the account.',
+      });
+    }
+
+    const { emailCode, whatsappCode, verification } = createVerificationRequest({
+      deviceId: targetDevice.deviceId,
+      email: contacts.email,
+      phone: contacts.phone,
+      initiatedByDeviceId: currentDeviceId,
+    });
+
+    user.deviceRemovalVerification = verification;
+    await user.save();
+
+    try {
+      await Promise.all([
+        sendDeviceRemovalEmail(contacts.email, emailCode, targetDevice.deviceName),
+        sendDeviceRemovalWhatsapp(contacts.phone, whatsappCode, targetDevice.deviceName),
+      ]);
+    } catch (deliveryError) {
+      clearVerification(user);
+      await user.save();
+      return res.status(500).json({
+        message: `Failed to send verification codes. ${deliveryError.message}`,
+      });
+    }
+
+    res.json({
+      message: 'Verification codes sent',
+      requestId: verification.requestId,
+      maskedEmail: maskEmail(contacts.email),
+      maskedPhone: maskPhone(contacts.phone),
+      expiresInMinutes: EXPIRY_MINUTES,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/devices/:deviceId/removal/confirm', async (req, res) => {
+  try {
+    const resolved = await resolveDeviceRemovalUser(req);
+    if (!resolved?.user) {
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    const { user, currentDeviceId } = resolved;
+    const { requestId, emailCode, whatsappCode } = req.body;
+    const verification = user.deviceRemovalVerification;
+
+    if (!verification || verification.deviceId !== req.params.deviceId || verification.requestId !== requestId) {
+      return res.status(400).json({ message: 'No active verification request for this device.' });
+    }
+
+    if (isExpired(verification)) {
+      clearVerification(user);
+      await user.save();
+      return res.status(400).json({ message: 'Verification codes have expired. Request new codes and try again.' });
+    }
+
+    if (verification.attempts >= MAX_DEVICE_VERIFICATION_ATTEMPTS) {
+      clearVerification(user);
+      await user.save();
+      return res.status(429).json({ message: 'Too many failed attempts. Request new verification codes.' });
+    }
+
+    const validEmailCode = isMatchingCode(emailCode, verification.emailCodeHash);
+    const validWhatsappCode = isMatchingCode(whatsappCode, verification.whatsappCodeHash);
+
+    if (!String(emailCode || '').trim() && !String(whatsappCode || '').trim()) {
+      return res.status(400).json({ message: 'Enter either your email code or your WhatsApp code.' });
+    }
+
+    if (!validEmailCode && !validWhatsappCode) {
+      verification.attempts += 1;
+      await user.save();
+      return res.status(400).json({
+        message: verification.attempts >= MAX_DEVICE_VERIFICATION_ATTEMPTS
+          ? 'Too many failed attempts. Request new verification codes.'
+          : 'Neither verification code matches.',
+      });
+    }
+
+    user.devices = user.devices.filter((device) => device.deviceId !== req.params.deviceId);
+    clearVerification(user);
+    await user.save();
+
+    res.json({
+      message: 'Device removed',
+      devices: serializeDevices(user, currentDeviceId),
+      removedCurrentDevice: currentDeviceId === req.params.deviceId,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.delete('/devices/:deviceId', (req, res) => {
+  res.status(403).json({
+    message: 'Direct device removal is disabled. Use the verification flow instead.',
+  });
+});
+
+router.get('/devices', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ message: 'No token' });
+
+    const decoded = jwt.verify(token, SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    res.json(serializeDevices(user, decoded.deviceId));
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/me', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ message: 'No token' });
+
+    const decoded = jwt.verify(token, SECRET);
+    const user = await User.findById(decoded.id).select('-password -devices -sessions -resetToken');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    res.json({ user: safeUser(user) });
+  } catch {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+});
+
+router.post('/logout', (req, res) => res.json({ message: 'Logged out' }));
+
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const genericMessage = 'If that email exists, a one-time password has been sent.';
+
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      return res.json({ message: genericMessage });
+    }
+
+    if (isPhoneProxyEmail(normalizedEmail)) {
+      return res.json({ message: genericMessage });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.json({
+        message: genericMessage,
+        maskedEmail: maskEmail(normalizedEmail),
+        expiresInMinutes: OTP_EXPIRY_MINUTES,
+      });
+    }
+
+    const code = await saveOtp({
+      purpose: 'password_reset',
+      email: normalizedEmail,
+      payload: {
+        userId: String(user._id),
+      },
+    });
+
+    try {
+      await sendOneTimePasswordEmail({
+        to: normalizedEmail,
+        name: user.name,
+        code,
+        purpose: 'password_reset',
+        expiresInMinutes: OTP_EXPIRY_MINUTES,
+      });
+    } catch (deliveryError) {
+      await AuthOtp.deleteOne({ purpose: 'password_reset', email: normalizedEmail });
+      return res.status(500).json({
+        message: `Failed to send password reset code. ${deliveryError.message}`,
+      });
+    }
+
+    res.json({
+      message: genericMessage,
+      maskedEmail: maskEmail(normalizedEmail),
+      expiresInMinutes: OTP_EXPIRY_MINUTES,
+    });
+  } catch (err) {
+    console.error('Forgot password error:', err.message);
+    res.status(500).json({ message: 'Failed to send reset code. Check server email config.' });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!hasStrongEnoughPassword(password)) {
+      return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
+
+    if (token) {
+      const user = await User.findOne({
+        resetToken: token,
+        resetTokenExpiry: { $gt: new Date() },
+      });
+
+      if (!user) return res.status(400).json({ message: 'Reset link is invalid or has expired.' });
+
+      user.password = await bcrypt.hash(password, 10);
+      user.resetToken = undefined;
+      user.resetTokenExpiry = undefined;
+      await user.save();
+
+      return res.json({ message: 'Password reset successfully. You can now log in.' });
+    }
+
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const otp = String(req.body.otp || '').trim();
+    const errorMessages = getOtpErrorMessage('password_reset');
+
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: 'Enter a valid email address.' });
+    }
+
+    if (!otp) {
+      return res.status(400).json({ message: 'Enter the one-time password we sent to your email.' });
+    }
+
+    const pendingOtp = await AuthOtp.findOne({ purpose: 'password_reset', email: normalizedEmail });
+    if (!pendingOtp) {
+      return res.status(400).json({ message: errorMessages.notFound });
+    }
+
+    if (isOtpExpired(pendingOtp)) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: errorMessages.expired });
+    }
+
+    if (pendingOtp.attempts >= MAX_OTP_ATTEMPTS) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(429).json({ message: errorMessages.tooManyAttempts });
+    }
+
+    if (!isMatchingOtp(otp, pendingOtp.codeHash)) {
+      const tooManyAttemptsMessage = await incrementOtpAttempts(pendingOtp, errorMessages.tooManyAttempts);
+      return res.status(400).json({
+        message: tooManyAttemptsMessage || errorMessages.invalid,
+      });
+    }
+
+    const user = pendingOtp.payload?.userId
+      ? await User.findById(pendingOtp.payload.userId)
+      : await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'Account not found for this reset request.' });
+    }
+
+    user.password = await bcrypt.hash(password, 10);
+    user.resetToken = undefined;
+    user.resetTokenExpiry = undefined;
+    await user.save();
+
+    await AuthOtp.deleteOne({ _id: pendingOtp._id });
+
+    res.json({ message: 'Password reset successfully. You can now log in.' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+module.exports = router;
