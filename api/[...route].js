@@ -31,7 +31,9 @@ function applyCors(req, res) {
     }
   }
 
-  if (requestOrigin && isAllowedOrigin(requestOrigin)) {
+  if (!allowedOrigins.length || allowedOrigins.includes('*')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  } else if (requestOrigin && isAllowedOrigin(requestOrigin)) {
     res.setHeader('Access-Control-Allow-Origin', requestOrigin);
   }
 
