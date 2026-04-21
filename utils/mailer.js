@@ -201,12 +201,12 @@ async function sendOneTimePasswordEmail({ to, name, code, purpose, deviceName, e
     try {
       return await sendViaEmailJs(templateParams);
     } catch (error) {
-      if (!allowDevEmailPreview()) {
+      const canFallbackToSmtp = isMailConfigured() || allowDevEmailPreview();
+      if (!canFallbackToSmtp) {
         throw error;
       }
 
-      // Local development should keep moving even when EmailJS cannot be reached.
-      console.warn(`[dev] EmailJS delivery failed. Falling back to local preview. ${error.message}`);
+      console.warn(`EmailJS delivery failed. Falling back to SMTP. ${error.message}`);
     }
   }
 
