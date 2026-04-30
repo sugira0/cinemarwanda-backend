@@ -383,6 +383,172 @@ router.post('/firebase/register', async (req, res) => {
   }
 });
 
+router.post('/firebase/register/request-otp', async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      phone,
+      password,
+      role,
+      deviceId,
+      deviceName,
+      deviceLocation,
+      deviceMeta,
+    } = req.body;
+
+    const trimmedName = String(name || '').trim();
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPhone = normalizePhone(phone);
+
+    if (!trimmedName) {
+      return res.status(400).json({ message: 'Enter your full name.' });
+    }
+
+    if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: 'Enter a valid email address to receive your sign-up code.' });
+    }
+
+    if (phone && !normalizedPhone) {
+      return res.status(400).json({ message: 'Enter a valid Rwanda mobile number like +2507XXXXXXXX.' });
+    }
+
+    if (!hasStrongEnoughPassword(password)) {
+      return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
+
+    const deviceSnapshot = buildDeviceSnapshot(req, {
+      deviceName,
+      deviceLocation,
+      deviceMeta,
+    });
+    const code = await saveOtp({
+      purpose: 'register',
+      email: normalizedEmail,
+      payload: {
+        name: trimmedName,
+        email: normalizedEmail,
+        phone: normalizedPhone || null,
+        password,
+        role: normalizeRole(role),
+        deviceId: deviceId || `dev_${Date.now()}`,
+        deviceSnapshot,
+      },
+    });
+
+    await sendOneTimePasswordEmail({
+      to: normalizedEmail,
+      name: trimmedName,
+      code,
+      purpose: 'register',
+      expiresInMinutes: OTP_EXPIRY_MINUTES,
+    });
+
+    res.json({
+      message: 'We sent a one-time password to your email. Enter it below to finish creating your account.',
+      maskedEmail: maskEmail(normalizedEmail),
+      expiresInMinutes: OTP_EXPIRY_MINUTES,
+    });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ message: err.message });
+  }
+});
+
+router.post('/firebase/register/verify-otp', async (req, res) => {
+  try {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const otp = String(req.body.otp || '').trim();
+    const errorMessages = getOtpErrorMessage('register');
+
+    if (!normalizedEmail || !otp) {
+      return res.status(400).json({ message: 'Enter the email address and sign-up code.' });
+    }
+
+    const pendingOtp = await AuthOtp.findOne({ purpose: 'register', email: normalizedEmail });
+    if (!pendingOtp) {
+      return res.status(400).json({ message: errorMessages.notFound });
+    }
+
+    if (isOtpExpired(pendingOtp)) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: errorMessages.expired });
+    }
+
+    if (pendingOtp.attempts >= MAX_OTP_ATTEMPTS) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(429).json({ message: errorMessages.tooManyAttempts });
+    }
+
+    if (!isMatchingOtp(otp, pendingOtp.codeHash)) {
+      const tooManyAttemptsMessage = await incrementOtpAttempts(pendingOtp, errorMessages.tooManyAttempts);
+      return res.status(400).json({
+        message: tooManyAttemptsMessage || errorMessages.invalid,
+      });
+    }
+
+    const payload = pendingOtp.payload || {};
+    if (!payload.name || !payload.email || !payload.password) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'This sign-up session is incomplete. Request a new code.' });
+    }
+
+    let tokenData;
+    try {
+      tokenData = await firebaseAuthRequest('signUp', {
+        email: payload.email,
+        password: payload.password,
+        displayName: payload.name,
+        returnSecureToken: true,
+      });
+    } catch (firebaseError) {
+      if (firebaseError.firebaseCode !== 'EMAIL_EXISTS') throw firebaseError;
+      tokenData = await signInExistingFirebaseAccount(payload.email, payload.password);
+    }
+
+    const user = await findOrCreateFirebaseUser({
+      uid: tokenData.localId,
+      email: tokenData.email || payload.email,
+      name: payload.name,
+    }, {
+      ...req,
+      body: {
+        ...req.body,
+        name: payload.name,
+        email: payload.email,
+        phone: payload.phone,
+        role: payload.role,
+        deviceId: payload.deviceId,
+      },
+    });
+
+    const deviceReq = {
+      ...req,
+      body: {
+        ...req.body,
+        deviceId: payload.deviceId,
+        deviceName: payload.deviceSnapshot?.deviceName,
+        deviceLocation: payload.deviceSnapshot?.location,
+        deviceMeta: {
+          platform: payload.deviceSnapshot?.platform,
+          language: payload.deviceSnapshot?.language,
+        },
+      },
+    };
+    const session = await createFirebaseSessionPayload(user, deviceReq, tokenData);
+    await AuthOtp.deleteOne({ _id: pendingOtp._id });
+
+    res.status(201).json({
+      ...session,
+      message: 'Email verified. Your account is ready.',
+    });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({
+      message: err.message,
+      ...(err.devices ? { devices: err.devices } : {}),
+    });
+  }
+});
+
 router.post('/firebase/login', async (req, res) => {
   try {
     const normalizedEmail = normalizeEmail(req.body.email || req.body.identifier);
