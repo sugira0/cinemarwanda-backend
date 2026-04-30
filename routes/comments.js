@@ -1,16 +1,13 @@
-const jwt = require('jsonwebtoken');
 const router = require('express').Router();
 const Comment = require('../models/Comment');
 const Movie = require('../models/Movie');
 const Notification = require('../models/Notification');
-const { protect } = require('../middleware/auth');
+const { protect, getRequestToken, resolveAuthToken } = require('../middleware/auth');
 
-const SECRET = process.env.JWT_SECRET || 'cinema_rwanda_secret';
-
-function optionalAuth(req) {
+async function optionalAuth(req) {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    return token ? jwt.verify(token, SECRET) : null;
+    const auth = await resolveAuthToken(getRequestToken(req));
+    return auth ? { id: auth.userId, role: auth.role, name: auth.user?.name } : null;
   } catch {
     return null;
   }
@@ -36,7 +33,7 @@ router.get('/:movieId', async (req, res) => {
 
 router.post('/:movieId', async (req, res) => {
   try {
-    const viewer = optionalAuth(req);
+    const viewer = await optionalAuth(req);
     const { text, rating, name } = req.body;
     if (!text?.trim()) {
       return res.status(400).json({ message: 'Review text required' });
@@ -92,7 +89,7 @@ router.delete('/:id', protect, async (req, res) => {
 
 router.post('/:id/like', async (req, res) => {
   try {
-    const viewer = optionalAuth(req);
+    const viewer = await optionalAuth(req);
     const comment = await Comment.findById(req.params.id);
     if (!comment) {
       return res.status(404).json({ message: 'Not found' });

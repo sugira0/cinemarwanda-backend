@@ -1,18 +1,16 @@
 const router = require('express').Router();
-const jwt = require('jsonwebtoken');
 const Movie = require('../models/Movie');
 const Stream = require('../models/Stream');
-const { protect, authorOrAdmin } = require('../middleware/auth');
+const { protect, authorOrAdmin, getRequestToken, resolveAuthToken } = require('../middleware/auth');
 const { requireSubscription } = require('../middleware/subscription');
 const { uploadAsset, deleteStoredAsset, upload } = require('../utils/storage');
 
-const SECRET = process.env.JWT_SECRET || 'cinema_rwanda_secret';
 const ACTIVE_STREAM_WINDOW_MS = 60000;
 
-function optionalAuth(req) {
+async function optionalAuth(req) {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    return token ? jwt.verify(token, SECRET) : null;
+    const auth = await resolveAuthToken(getRequestToken(req));
+    return auth ? { id: auth.userId, role: auth.role } : null;
   } catch {
     return null;
   }
@@ -126,7 +124,7 @@ function buildPlaybackSource(movieId, source, deviceId, token = null, episodeId 
 
 router.get('/', async (req, res) => {
   try {
-    const user = optionalAuth(req);
+    const user = await optionalAuth(req);
     const { search, genre, type } = req.query;
     const query = {};
 
@@ -144,7 +142,7 @@ router.get('/', async (req, res) => {
 
 router.get('/home', async (req, res) => {
   try {
-    const user = optionalAuth(req);
+    const user = await optionalAuth(req);
     const [featured, latest, recommended] = await Promise.all([
       Movie.find({ featured: true }).limit(5).select('-viewedIPs'),
       Movie.find({}).sort({ createdAt: -1 }).limit(20).select('-viewedIPs'),
@@ -164,7 +162,7 @@ router.get('/home', async (req, res) => {
 
 router.get('/featured', async (req, res) => {
   try {
-    const user = optionalAuth(req);
+    const user = await optionalAuth(req);
     const movies = await Movie.find({ featured: true }).limit(5).select('-viewedIPs');
     res.json(movies.map((movie) => serializeMovie(movie, user)));
   } catch (err) {
@@ -209,7 +207,7 @@ router.get('/:id/stream', protect, requireSubscription, async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const user = optionalAuth(req);
+    const user = await optionalAuth(req);
     const movie = await Movie.findById(req.params.id);
 
     if (!movie) {
