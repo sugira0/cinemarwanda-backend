@@ -324,10 +324,15 @@ router.post('/firebase/register', async (req, res) => {
       returnSecureToken: true,
     });
 
+    let verificationEmailSent = true;
+    let verificationEmailWarning = null;
+
     await firebaseAuthRequest('sendOobCode', {
       requestType: 'VERIFY_EMAIL',
       idToken: tokenData.idToken,
     }).catch((error) => {
+      verificationEmailSent = false;
+      verificationEmailWarning = error.message;
       console.warn(`Firebase verification email failed: ${error.message}`);
     });
 
@@ -340,7 +345,11 @@ router.post('/firebase/register', async (req, res) => {
     const payload = await createFirebaseSessionPayload(user, req, tokenData);
     res.status(201).json({
       ...payload,
-      message: 'Your account was created with Firebase. We sent a verification link to your email.',
+      verificationEmailSent,
+      verificationEmailWarning,
+      message: verificationEmailSent
+        ? 'Your account was created. Firebase sent a verification link to your email.'
+        : 'Your account was created, but Firebase could not send the verification email. You can still sign in while we check the email template settings.',
     });
   } catch (err) {
     res.status(err.statusCode || 500).json({
