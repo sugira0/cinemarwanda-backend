@@ -248,11 +248,11 @@ function getRemovalContacts(user) {
   const email = sanitizeEmail(user.email);
   const phone = normalizePhone(user.phone);
 
-  if (!email || !phone) {
+  if (!email) {
     return null;
   }
 
-  return { email, phone };
+  return { email, phone: phone || null };
 }
 
 async function resolveDeviceRemovalUser(req) {
@@ -696,7 +696,7 @@ router.post('/devices/:deviceId/removal/request', async (req, res) => {
     const contacts = getRemovalContacts(user);
     if (!contacts) {
       return res.status(400).json({
-        message: 'Device removal requires both a verified email address and a WhatsApp-enabled phone number on the account.',
+        message: 'Device removal requires an email address on the account.',
       });
     }
 
@@ -710,24 +710,43 @@ router.post('/devices/:deviceId/removal/request', async (req, res) => {
     user.deviceRemovalVerification = verification;
     await user.save();
 
+    let emailDelivered = false;
+    let whatsappDelivered = false;
+    const deliveryErrors = [];
+
     try {
-      await Promise.all([
-        sendDeviceRemovalEmail(contacts.email, emailCode, targetDevice.deviceName),
-        sendDeviceRemovalWhatsapp(contacts.phone, whatsappCode, targetDevice.deviceName),
-      ]);
+      await sendDeviceRemovalEmail(contacts.email, emailCode, targetDevice.deviceName);
+      emailDelivered = true;
     } catch (deliveryError) {
+      deliveryErrors.push(`Email: ${deliveryError.message}`);
+    }
+
+    if (contacts.phone) {
+      try {
+        await sendDeviceRemovalWhatsapp(contacts.phone, whatsappCode, targetDevice.deviceName);
+        whatsappDelivered = true;
+      } catch (deliveryError) {
+        deliveryErrors.push(`WhatsApp: ${deliveryError.message}`);
+      }
+    }
+
+    if (!emailDelivered && !whatsappDelivered) {
       clearVerification(user);
       await user.save();
       return res.status(500).json({
-        message: `Failed to send verification codes. ${deliveryError.message}`,
+        message: `Failed to send verification code. ${deliveryErrors.join(' ')}`,
       });
     }
 
     res.json({
-      message: 'Verification codes sent',
+      message: whatsappDelivered ? 'Verification codes sent' : 'Email verification code sent',
       requestId: verification.requestId,
       maskedEmail: maskEmail(contacts.email),
-      maskedPhone: maskPhone(contacts.phone),
+      maskedPhone: whatsappDelivered ? maskPhone(contacts.phone) : null,
+      channels: {
+        email: emailDelivered,
+        whatsapp: whatsappDelivered,
+      },
       expiresInMinutes: EXPIRY_MINUTES,
     });
   } catch (err) {
