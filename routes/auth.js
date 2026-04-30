@@ -233,6 +233,14 @@ async function createFirebaseSessionPayload(user, req, tokenData) {
   };
 }
 
+async function signInExistingFirebaseAccount(email, password) {
+  return firebaseAuthRequest('signInWithPassword', {
+    email,
+    password,
+    returnSecureToken: true,
+  });
+}
+
 function serializeDevices(user, currentDeviceId) {
   return user.devices.map((device) => ({
     deviceId: device.deviceId,
@@ -317,24 +325,38 @@ router.post('/firebase/register', async (req, res) => {
       return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
     }
 
-    const tokenData = await firebaseAuthRequest('signUp', {
-      email: normalizedEmail,
-      password,
-      displayName: name,
-      returnSecureToken: true,
-    });
+    let createdAccount = true;
+    let tokenData;
+
+    try {
+      tokenData = await firebaseAuthRequest('signUp', {
+        email: normalizedEmail,
+        password,
+        displayName: name,
+        returnSecureToken: true,
+      });
+    } catch (firebaseError) {
+      if (firebaseError.firebaseCode !== 'EMAIL_EXISTS') throw firebaseError;
+      createdAccount = false;
+      tokenData = await signInExistingFirebaseAccount(normalizedEmail, password);
+    }
 
     let verificationEmailSent = true;
     let verificationEmailWarning = null;
 
-    await firebaseAuthRequest('sendOobCode', {
-      requestType: 'VERIFY_EMAIL',
-      idToken: tokenData.idToken,
-    }).catch((error) => {
+    if (createdAccount) {
+      await firebaseAuthRequest('sendOobCode', {
+        requestType: 'VERIFY_EMAIL',
+        idToken: tokenData.idToken,
+      }).catch((error) => {
+        verificationEmailSent = false;
+        verificationEmailWarning = error.message;
+        console.warn(`Firebase verification email failed: ${error.message}`);
+      });
+    } else {
       verificationEmailSent = false;
-      verificationEmailWarning = error.message;
-      console.warn(`Firebase verification email failed: ${error.message}`);
-    });
+      verificationEmailWarning = 'Account already existed, so no new verification email was sent.';
+    }
 
     const user = await findOrCreateFirebaseUser({
       uid: tokenData.localId,
@@ -347,7 +369,9 @@ router.post('/firebase/register', async (req, res) => {
       ...payload,
       verificationEmailSent,
       verificationEmailWarning,
-      message: verificationEmailSent
+      message: !createdAccount
+        ? 'This email already had an account, so we signed you in.'
+        : verificationEmailSent
         ? 'Your account was created. Firebase sent a verification link to your email.'
         : 'Your account was created, but Firebase could not send the verification email. You can still sign in while we check the email template settings.',
     });
