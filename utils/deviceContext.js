@@ -34,11 +34,14 @@ function normalizeIp(value) {
 }
 
 function getRequestIp(req) {
+  const headers = req?.headers || {};
+
   return normalizeIp(
-    req.headers['x-forwarded-for']
-      || req.ip
-      || req.socket?.remoteAddress
-      || req.connection?.remoteAddress
+    headers['x-forwarded-for']
+      || headers['x-real-ip']
+      || req?.ip
+      || req?.socket?.remoteAddress
+      || req?.connection?.remoteAddress
   );
 }
 
@@ -82,13 +85,14 @@ function normalizeLocation(location, ip) {
 }
 
 function buildDeviceSnapshot(req, { deviceName, deviceLocation, deviceMeta } = {}) {
+  const headers = req?.headers || {};
   const lastIp = getRequestIp(req);
 
   return {
     deviceName: cleanText(deviceName, 120) || 'Unknown Device',
     lastSeen: new Date(),
     lastIp: lastIp || undefined,
-    userAgent: cleanText(deviceMeta?.userAgent || req.headers['user-agent'], 500) || undefined,
+    userAgent: cleanText(deviceMeta?.userAgent || headers['user-agent'], 500) || undefined,
     platform: cleanText(deviceMeta?.platform, 120) || undefined,
     language: cleanText(deviceMeta?.language, 40) || undefined,
     location: normalizeLocation(deviceLocation, lastIp),
