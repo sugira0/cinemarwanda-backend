@@ -12,7 +12,7 @@ const PLANS = {
   premium: { price: 10000, days: 30, label: 'Premium' },
 };
 
-const PAYMENT_METHODS = new Set(['momo', 'airtel']);
+const PAYMENT_METHODS = new Set(['momo', 'airtel', 'card']);
 
 router.get('/my', protect, async (req, res) => {
   try {
@@ -26,7 +26,7 @@ router.get('/my', protect, async (req, res) => {
 
 router.post('/initiate', protect, async (req, res) => {
   try {
-    const { plan, method, phone } = req.body;
+    const { plan, method, phone, cardLast4, cardName } = req.body;
     if (!PLANS[plan]) {
       return res.status(400).json({ message: 'Invalid plan' });
     }
@@ -36,18 +36,19 @@ router.post('/initiate', protect, async (req, res) => {
     }
 
     const user = await User.findById(req.user.id);
+    const isCardPayment = method === 'card';
     const submittedPhone = normalizePhone(phone);
     let paymentPhone = user?.phone || submittedPhone;
 
-    if (user?.phone && submittedPhone && submittedPhone !== user.phone) {
+    if (!isCardPayment && user?.phone && submittedPhone && submittedPhone !== user.phone) {
       return res.status(400).json({ message: 'Use the mobile number saved on your account for subscription payments' });
     }
 
-    if (!paymentPhone) {
+    if (!isCardPayment && !paymentPhone) {
       return res.status(400).json({ message: 'Add a valid Rwanda mobile number to your account first' });
     }
 
-    if (!user.phone) {
+    if (!isCardPayment && !user.phone) {
       user.phone = paymentPhone;
       await user.save();
     }
@@ -65,7 +66,9 @@ router.post('/initiate', protect, async (req, res) => {
       reference,
       expiresAt,
       status: 'pending',
-      notes: `Phone: ${paymentPhone}`,
+      notes: isCardPayment
+        ? `Card: ${cardName || user.name || 'Cardholder'}${cardLast4 ? ` ending ${String(cardLast4).slice(-4)}` : ''}`
+        : `Phone: ${paymentPhone}`,
     });
 
     const ussd = buildUSSD(method, PLANS[plan].price, reference, paymentPhone);
