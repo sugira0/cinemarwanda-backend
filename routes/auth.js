@@ -395,6 +395,7 @@ router.post('/firebase/register/request-otp', async (req, res) => {
       deviceName,
       deviceLocation,
       deviceMeta,
+      deferPassword,
     } = req.body;
 
     const trimmedName = String(name || '').trim();
@@ -413,7 +414,7 @@ router.post('/firebase/register/request-otp', async (req, res) => {
       return res.status(400).json({ message: 'Enter a valid Rwanda mobile number like +2507XXXXXXXX.' });
     }
 
-    if (!hasStrongEnoughPassword(password)) {
+    if (!deferPassword && !hasStrongEnoughPassword(password)) {
       return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
     }
 
@@ -672,7 +673,7 @@ router.post('/register/request-otp', async (req, res) => {
       deviceMeta,
     });
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = deferPassword ? null : await bcrypt.hash(password, 10);
     const code = await saveOtp({
       purpose: 'register',
       email: normalizedEmail,
@@ -680,7 +681,8 @@ router.post('/register/request-otp', async (req, res) => {
         name: trimmedName,
         email: normalizedEmail,
         phone: normalizedPhone || null,
-        passwordHash,
+        ...(passwordHash ? { passwordHash } : {}),
+        otpVerified: false,
         role: resolvedRole,
         deviceId: resolvedDeviceId,
         deviceSnapshot,
@@ -745,9 +747,26 @@ router.post('/register/verify-otp', async (req, res) => {
     }
 
     const payload = pendingOtp.payload || {};
-    if (!payload.name || !payload.passwordHash) {
+    if (!payload.name) {
       await AuthOtp.deleteOne({ _id: pendingOtp._id });
       return res.status(400).json({ message: 'This sign-up session is incomplete. Request a new code.' });
+    }
+
+    if (!payload.passwordHash && !req.body.password) {
+      pendingOtp.payload = { ...payload, otpVerified: true };
+      pendingOtp.markModified('payload');
+      await pendingOtp.save();
+      return res.json({
+        verified: true,
+        message: 'Email verified. Set your security password to finish creating your account.',
+      });
+    }
+
+    if (!payload.passwordHash && req.body.password) {
+      if (!hasStrongEnoughPassword(req.body.password)) {
+        return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+      }
+      payload.passwordHash = await bcrypt.hash(req.body.password, 10);
     }
 
     if (await User.findOne({ email: normalizedEmail })) {
@@ -785,6 +804,72 @@ router.post('/register/verify-otp', async (req, res) => {
     res.status(201).json({ token, deviceId, user: safeUser(user, { actorId }) });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/register/set-password', async (req, res) => {
+  try {
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const password = String(req.body.password || '');
+
+    if (!normalizedEmail) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    if (!hasStrongEnoughPassword(password)) {
+      return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
+
+    const pendingOtp = await AuthOtp.findOne({ purpose: 'register', email: normalizedEmail });
+    if (!pendingOtp) {
+      return res.status(400).json({ message: 'No verified sign-up session was found. Request a new code.' });
+    }
+
+    if (isOtpExpired(pendingOtp)) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'Your sign-up session has expired. Request a new code.' });
+    }
+
+    const payload = pendingOtp.payload || {};
+    if (!payload.otpVerified || !payload.name) {
+      return res.status(400).json({ message: 'Verify your email code before setting a password.' });
+    }
+
+    if (await User.findOne({ email: normalizedEmail })) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'Email already in use.' });
+    }
+
+    if (payload.phone && await User.findOne({ phone: payload.phone })) {
+      await AuthOtp.deleteOne({ _id: pendingOtp._id });
+      return res.status(400).json({ message: 'Phone number already in use.' });
+    }
+
+    const deviceId = payload.deviceId || `dev_${Date.now()}`;
+    const deviceSnapshot = payload.deviceSnapshot || buildDeviceSnapshot(req, {});
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
+      name: payload.name,
+      email: payload.email || normalizedEmail,
+      phone: payload.phone || undefined,
+      password: passwordHash,
+      role: normalizeRole(payload.role),
+      devices: [{ deviceId, ...deviceSnapshot }],
+    });
+
+    let actorId = null;
+    if (user.role === 'actor') {
+      const actor = await Actor.create({ name: user.name, userId: user._id });
+      actorId = actor._id;
+    }
+
+    await AuthOtp.deleteOne({ _id: pendingOtp._id });
+
+    const token = signToken(user, deviceId);
+    return res.status(201).json({ token, deviceId, user: safeUser(user, { actorId }) });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
   }
 });
 
