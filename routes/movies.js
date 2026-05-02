@@ -54,6 +54,37 @@ function serializeMovie(movie, user) {
   return payload;
 }
 
+function serializeMovieSummary(movie) {
+  const payload = movie?.toObject ? movie.toObject() : { ...movie };
+  const episodes = Array.isArray(payload.episodes) ? payload.episodes : [];
+
+  return {
+    _id: payload._id,
+    title: payload.title,
+    description: payload.description,
+    genre: payload.genre || [],
+    year: payload.year,
+    duration: payload.duration,
+    language: payload.language,
+    poster: payload.poster,
+    trailerUrl: payload.trailerUrl,
+    type: payload.type || 'movie',
+    featured: Boolean(payload.featured),
+    views: payload.views || 0,
+    createdAt: payload.createdAt,
+    updatedAt: payload.updatedAt,
+    hasVideo: hasVideoSource(payload) || episodes.some((episode) => hasVideoSource(episode)),
+    episodes: episodes.map((episode) => ({
+      _id: episode._id,
+      season: episode.season,
+      episode: episode.episode,
+      title: episode.title,
+      duration: episode.duration,
+      hasVideo: hasVideoSource(episode),
+    })),
+  };
+}
+
 function canEdit(movie, user) {
   return user?.role === 'admin' || String(movie.authorId) === String(user?.id);
 }
@@ -124,7 +155,6 @@ function buildPlaybackSource(movieId, source, deviceId, token = null, episodeId 
 
 router.get('/', async (req, res) => {
   try {
-    const user = await optionalAuth(req);
     const { search, genre, type } = req.query;
     const query = {};
 
@@ -132,9 +162,14 @@ router.get('/', async (req, res) => {
     if (genre) query.genre = genre;
     if (type) query.type = type;
 
-    const movies = await Movie.find(query).sort({ createdAt: -1 }).select('-viewedIPs');
-    res.set('Cache-Control', 'public, max-age=15');
-    res.json(movies.map((movie) => serializeMovie(movie, user)));
+    const movies = await Movie.find(query)
+      .sort({ createdAt: -1 })
+      .limit(120)
+      .select('title description genre year duration language poster trailerUrl type featured views episodes.title episodes.season episodes.episode episodes.duration episodes.videoUrl episodes.videoLink createdAt updatedAt')
+      .lean();
+
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    res.json(movies.map(serializeMovieSummary));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -142,18 +177,18 @@ router.get('/', async (req, res) => {
 
 router.get('/home', async (req, res) => {
   try {
-    const user = await optionalAuth(req);
+    const summaryFields = 'title description genre year duration language poster trailerUrl type featured views episodes.title episodes.season episodes.episode episodes.duration episodes.videoUrl episodes.videoLink createdAt updatedAt';
     const [featured, latest, recommended] = await Promise.all([
-      Movie.find({ featured: true }).limit(5).select('-viewedIPs'),
-      Movie.find({}).sort({ createdAt: -1 }).limit(20).select('-viewedIPs'),
-      Movie.find({}).sort({ views: -1 }).limit(10).select('-viewedIPs'),
+      Movie.find({ featured: true }).limit(5).select(summaryFields).lean(),
+      Movie.find({}).sort({ createdAt: -1 }).limit(20).select(summaryFields).lean(),
+      Movie.find({}).sort({ views: -1 }).limit(10).select(summaryFields).lean(),
     ]);
 
-    res.set('Cache-Control', 'public, max-age=30');
+    res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
     res.json({
-      featured: featured.map((movie) => serializeMovie(movie, user)),
-      latest: latest.map((movie) => serializeMovie(movie, user)),
-      recommended: recommended.map((movie) => serializeMovie(movie, user)),
+      featured: featured.map(serializeMovieSummary),
+      latest: latest.map(serializeMovieSummary),
+      recommended: recommended.map(serializeMovieSummary),
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
