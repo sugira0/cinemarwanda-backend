@@ -1,5 +1,7 @@
 const fs = require('fs');
 const multer = require('multer');
+const path = require('path');
+const { Readable } = require('stream');
 const { v2: cloudinary } = require('cloudinary');
 const {
   buildLocalUploadName,
@@ -12,7 +14,12 @@ const {
 let cloudinaryConfigured = false;
 
 function getMediaBackend() {
-  return String(process.env.MEDIA_BACKEND || 'local').trim().toLowerCase();
+  const configuredBackend = String(process.env.MEDIA_BACKEND || '').trim().toLowerCase();
+  if (configuredBackend) {
+    return configuredBackend;
+  }
+
+  return isCloudinaryConfigured() ? 'cloudinary' : 'local';
 }
 
 function isCloudinaryConfigured() {
@@ -125,6 +132,21 @@ async function uploadToCloudinary(file, { folder, resourceType }) {
       resolve(result);
     };
 
+    if (file.buffer) {
+      const uploadStream = resourceType === 'video' && cloudinary.uploader.upload_large_stream
+        ? cloudinary.uploader.upload_large_stream(
+          {
+            ...uploadOptions,
+            chunk_size: Number(process.env.CLOUDINARY_VIDEO_CHUNK_SIZE || 6_000_000),
+          },
+          done,
+        )
+        : cloudinary.uploader.upload_stream(uploadOptions, done);
+
+      Readable.from(file.buffer).pipe(uploadStream);
+      return;
+    }
+
     if (resourceType === 'video') {
       cloudinary.uploader.upload_large(
         file.path,
@@ -141,15 +163,34 @@ async function uploadToCloudinary(file, { folder, resourceType }) {
   });
 }
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    ensureUploadDir();
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => cb(null, buildLocalUploadName(file.originalname)),
-});
+const upload = multer({ storage: multer.memoryStorage() });
 
-const upload = multer({ storage });
+async function saveLocalUpload(file) {
+  if (process.env.VERCEL) {
+    throw new Error(
+      'File uploads on Vercel require persistent storage. Configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET, or upload by external URL.'
+    );
+  }
+
+  ensureUploadDir();
+  const filename = file.filename || buildLocalUploadName(file.originalname);
+  const destination = path.join(uploadDir, filename);
+
+  if (file.buffer) {
+    await fs.promises.writeFile(destination, file.buffer);
+  } else if (file.path) {
+    await fs.promises.copyFile(file.path, destination);
+    await safeUnlink(file.path);
+  } else {
+    throw new Error('Uploaded file data is missing.');
+  }
+
+  return {
+    provider: 'local',
+    ref: filename,
+    resourceType: file.mimetype?.startsWith('video/') ? 'video' : 'image',
+  };
+}
 
 async function uploadAsset(file, options = {}) {
   if (!file) {
@@ -177,11 +218,7 @@ async function uploadAsset(file, options = {}) {
     }
   }
 
-  return {
-    provider: 'local',
-    ref: file.filename,
-    resourceType,
-  };
+  return saveLocalUpload(file);
 }
 
 async function deleteStoredAsset(reference, options = {}) {
