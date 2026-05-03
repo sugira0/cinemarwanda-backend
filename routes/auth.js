@@ -1,6 +1,5 @@
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Actor = require('../models/Actor');
@@ -39,7 +38,6 @@ const { buildDeviceSnapshot } = require('../utils/deviceContext');
 const SECRET = process.env.JWT_SECRET;
 const MAX_DEVICES = 2;
 const MIN_PASSWORD_LENGTH = 6;
-const EMERGENCY_ADMIN_SETUP_TOKEN_HASH = '21ce6d8a198f2b985cd72bd0bec64b1008adfe63e3ee49dff0356336b6c5037c';
 
 const signToken = (user, deviceId) =>
   jwt.sign({ id: user._id, role: user.role, deviceId }, SECRET, { expiresIn: '30d' });
@@ -131,10 +129,7 @@ function getSubmittedSetupToken(req) {
 function isValidSetupToken(req) {
   const expected = getAdminSetupSecret();
   const submitted = getSubmittedSetupToken(req);
-  if (expected && submitted && submitted === expected) return true;
-  if (!submitted || !EMERGENCY_ADMIN_SETUP_TOKEN_HASH) return false;
-  const submittedHash = crypto.createHash('sha256').update(submitted).digest('hex');
-  return submittedHash === EMERGENCY_ADMIN_SETUP_TOKEN_HASH;
+  return Boolean(expected && submitted && submitted === expected);
 }
 
 function getOtpErrorMessage(purpose) {
