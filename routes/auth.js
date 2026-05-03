@@ -67,9 +67,20 @@ async function attachDevice(user, req, deviceId) {
     deviceLocation: req.body.deviceLocation,
     deviceMeta: req.body.deviceMeta,
   });
-  const existingDevice = user.devices.find((device) => device.deviceId === dId);
+  const existingDevice = user.devices.find((device) => device.deviceId === dId)
+    || user.devices.find((device) =>
+      device.deviceName
+      && device.deviceName === deviceSnapshot.deviceName
+      && (
+        (device.platform && deviceSnapshot.platform && device.platform === deviceSnapshot.platform)
+        || (device.userAgent && deviceSnapshot.userAgent && device.userAgent === deviceSnapshot.userAgent)
+        || (device.lastIp && deviceSnapshot.lastIp && device.lastIp === deviceSnapshot.lastIp)
+        || deviceSnapshot.deviceName === 'Expo Go mobile'
+      )
+    );
 
   if (existingDevice) {
+    existingDevice.deviceId = dId;
     existingDevice.deviceName = deviceSnapshot.deviceName;
     existingDevice.lastSeen = deviceSnapshot.lastSeen;
     existingDevice.lastIp = deviceSnapshot.lastIp;
@@ -911,39 +922,13 @@ router.post('/login', async (req, res) => {
       return res.status(403).json({ message: 'Your account has been suspended. Contact support.' });
     }
 
-    const dId = deviceId || `dev_${Date.now()}`;
-    const deviceSnapshot = buildDeviceSnapshot(req, {
-      deviceName,
-      deviceLocation,
-      deviceMeta,
-    });
-    const existingDevice = user.devices.find((device) => device.deviceId === dId);
-
-    if (existingDevice) {
-      existingDevice.deviceName = deviceSnapshot.deviceName;
-      existingDevice.lastSeen = deviceSnapshot.lastSeen;
-      existingDevice.lastIp = deviceSnapshot.lastIp;
-      existingDevice.userAgent = deviceSnapshot.userAgent;
-      existingDevice.platform = deviceSnapshot.platform;
-      existingDevice.language = deviceSnapshot.language;
-      existingDevice.location = deviceSnapshot.location;
-    } else {
-      if (user.devices.length >= MAX_DEVICES) {
-        return res.status(403).json({
-          message: `This account is already registered on ${MAX_DEVICES} devices. Remove a device to continue.`,
-          devices: user.devices.map((device) => ({
-            deviceId: device.deviceId,
-            deviceName: device.deviceName,
-            lastSeen: device.lastSeen,
-            locationLabel: device.location?.label || null,
-          })),
-        });
-      }
-
-      user.devices.push({ deviceId: dId, ...deviceSnapshot });
+    const deviceResult = await attachDevice(user, req, deviceId);
+    if (deviceResult.limited) {
+      return res.status(403).json({
+        message: `This account is already registered on ${MAX_DEVICES} devices. Remove a device to continue.`,
+        devices: deviceResult.devices,
+      });
     }
-
-    await user.save();
 
     let actorId = null;
     if (user.role === 'actor') {
@@ -951,8 +936,8 @@ router.post('/login', async (req, res) => {
       actorId = actor?._id || null;
     }
 
-    const token = signToken(user, dId);
-    res.json({ token, deviceId: dId, user: safeUser(user, { actorId }) });
+    const token = signToken(user, deviceResult.deviceId);
+    res.json({ token, deviceId: deviceResult.deviceId, user: safeUser(user, { actorId }) });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
