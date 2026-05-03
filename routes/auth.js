@@ -637,6 +637,7 @@ router.post('/register/request-otp', async (req, res) => {
       deviceName,
       deviceLocation,
       deviceMeta,
+      deferPassword,
     } = req.body;
 
     const trimmedName = String(name || '').trim();
@@ -655,7 +656,7 @@ router.post('/register/request-otp', async (req, res) => {
       return res.status(400).json({ message: 'Enter a valid Rwanda mobile number like +2507XXXXXXXX.' });
     }
 
-    if (!hasStrongEnoughPassword(password)) {
+    if (!deferPassword && !hasStrongEnoughPassword(password)) {
       return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
     }
 
