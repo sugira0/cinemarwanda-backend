@@ -118,6 +118,20 @@ function hasStrongEnoughPassword(password) {
   return String(password || '').length >= MIN_PASSWORD_LENGTH;
 }
 
+function getAdminSetupSecret() {
+  return process.env.ADMIN_SETUP_TOKEN || process.env.SEED_ADMIN_PASSWORD || process.env.JWT_SECRET || '';
+}
+
+function getSubmittedSetupToken(req) {
+  return String(req.body.setupToken || req.headers['x-admin-setup-token'] || '').trim();
+}
+
+function isValidSetupToken(req) {
+  const expected = getAdminSetupSecret();
+  const submitted = getSubmittedSetupToken(req);
+  return Boolean(expected && submitted && submitted === expected);
+}
+
 function getOtpErrorMessage(purpose) {
   if (purpose === 'register') {
     return {
@@ -892,6 +906,57 @@ router.post('/register', (req, res) => {
   res.status(410).json({
     message: 'Registration now requires email verification. Request a sign-up code first.',
   });
+});
+
+router.post('/admin/setup', async (req, res) => {
+  try {
+    if (!isValidSetupToken(req)) {
+      return res.status(403).json({ message: 'Invalid admin setup token' });
+    }
+
+    const email = normalizeEmail(req.body.email || process.env.SEED_ADMIN_EMAIL);
+    const password = String(req.body.password || process.env.SEED_ADMIN_PASSWORD || '');
+    const name = String(req.body.name || process.env.SEED_ADMIN_NAME || 'Admin').trim();
+    const deviceId = req.body.deviceId || `admin_setup_${Date.now()}`;
+
+    if (!email || !isValidEmail(email)) {
+      return res.status(400).json({ message: 'Enter a valid admin email.' });
+    }
+
+    if (!hasStrongEnoughPassword(password)) {
+      return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.` });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    let user = await User.findOne({ email });
+
+    if (user) {
+      user.name = name || user.name;
+      user.password = passwordHash;
+      user.role = 'admin';
+      user.status = 'active';
+    } else {
+      user = new User({
+        name: name || 'Admin',
+        email,
+        password: passwordHash,
+        role: 'admin',
+        status: 'active',
+      });
+    }
+
+    const deviceResult = await attachDevice(user, req, deviceId);
+    const token = signToken(user, deviceResult.deviceId);
+
+    return res.json({
+      message: 'Admin account is ready.',
+      token,
+      deviceId: deviceResult.deviceId,
+      user: safeUser(user),
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
 });
 
 router.post('/login', async (req, res) => {
