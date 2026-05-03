@@ -190,6 +190,82 @@ router.post('/broadcast', protect, adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// PATCH assign subscription manually
+router.patch('/:id/subscription', protect, adminOnly, async (req, res) => {
+  try {
+    const { plan, durationDays } = req.body;
+    const validPlans = ['free', 'basic', 'standard', 'premium'];
+
+    if (!plan || !validPlans.includes(plan)) {
+      return res.status(400).json({ message: 'Invalid plan. Must be: free, basic, standard, or premium' });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (plan === 'free') {
+      user.subscription = {
+        plan: 'free',
+        active: false,
+        expiresAt: null,
+      };
+    } else {
+      const days = Number.parseInt(durationDays, 10);
+      if (!Number.isFinite(days) || days < 1) {
+        return res.status(400).json({ message: 'Duration in days required (minimum 1 day)' });
+      }
+
+      user.subscription = {
+        plan,
+        active: true,
+        expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000),
+      };
+    }
+
+    await user.save();
+
+    await Notification.create({
+      userId: req.params.id,
+      type: 'system',
+      title: `${plan.charAt(0).toUpperCase() + plan.slice(1)} plan updated`,
+      message: plan === 'free'
+        ? 'Your paid subscription access has been removed.'
+        : `Your ${plan} subscription is active for ${Number.parseInt(durationDays, 10)} days.`,
+      link: '/plans',
+    });
+
+    res.json({
+      message: plan === 'free'
+        ? 'Subscription reset to free'
+        : `${plan} subscription assigned for ${Number.parseInt(durationDays, 10)} days`,
+      user: serializeUser(user),
+      subscription: user.subscription,
+    });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// GET subscription info
+router.get('/:id/subscription', protect, adminOnly, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('subscription');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const subscription = user.subscription || { plan: 'free', active: false };
+    const now = new Date();
+    const isExpired = subscription.expiresAt && new Date(subscription.expiresAt) < now;
+
+    res.json({
+      plan: subscription.plan,
+      active: subscription.active && !isExpired,
+      expiresAt: subscription.expiresAt,
+      isExpired: isExpired,
+      daysRemaining: subscription.expiresAt
+        ? Math.max(0, Math.ceil((new Date(subscription.expiresAt) - now) / (1000 * 60 * 60 * 24)))
+        : null,
+    });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 // ── DELETE user ───────────────────────────────────────────────────────────────
 router.delete('/:id', protect, adminOnly, async (req, res) => {
   try {
