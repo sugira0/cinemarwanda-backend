@@ -90,16 +90,21 @@ async function attachDevice(user, req, deviceId) {
     existingDevice.location = deviceSnapshot.location;
   } else {
     if (user.devices.length >= MAX_DEVICES) {
-      return {
-        limited: true,
-        deviceId: dId,
-        devices: user.devices.map((device) => ({
-          deviceId: device.deviceId,
-          deviceName: device.deviceName,
-          lastSeen: device.lastSeen,
-          locationLabel: device.location?.label || null,
-        })),
-      };
+      if (user.role === 'admin') {
+        user.devices.sort((left, right) => new Date(left.lastSeen || 0) - new Date(right.lastSeen || 0));
+        user.devices.shift();
+      } else {
+        return {
+          limited: true,
+          deviceId: dId,
+          devices: user.devices.map((device) => ({
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            lastSeen: device.lastSeen,
+            locationLabel: device.location?.label || null,
+          })),
+        };
+      }
     }
 
     user.devices.push({ deviceId: dId, ...deviceSnapshot });
