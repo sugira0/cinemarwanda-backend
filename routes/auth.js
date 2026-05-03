@@ -274,9 +274,11 @@ async function resolveDeviceRemovalUser(req) {
 
   const { identifier, email, phone, password } = req.body;
   const lookupValue = identifier || email || phone;
+  if (!lookupValue || !password) return null;
+
   const user = await findUserByIdentifier(lookupValue);
 
-  if (!user || !(await bcrypt.compare(password, user.password))) {
+  if (!user?.password || !(await bcrypt.compare(password, user.password))) {
     return null;
   }
 
@@ -892,9 +894,14 @@ router.post('/login', async (req, res) => {
       deviceMeta,
     } = req.body;
     const lookupValue = identifier || email || phone;
+
+    if (!lookupValue || !password) {
+      return res.status(400).json({ message: 'Enter your phone number and pin.' });
+    }
+
     const user = await findUserByIdentifier(lookupValue);
 
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user?.password || !(await bcrypt.compare(password, user.password))) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
