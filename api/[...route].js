@@ -1,5 +1,8 @@
 const app = require('../app');
 const { connectToDatabase } = require('../db');
+const seed = require('../seed');
+
+let seeded = false;
 
 function applyCors(req, res) {
   // Always expose ACAO so browser preflight cannot fail due env mismatches.
@@ -26,6 +29,10 @@ module.exports = async (req, res) => {
 
   try {
     await connectToDatabase();
+    if (!seeded) {
+      await seed();
+      seeded = true;
+    }
     return app(req, res);
   } catch (error) {
     console.error('Vercel API bootstrap error:', error);
