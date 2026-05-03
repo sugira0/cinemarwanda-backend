@@ -268,6 +268,7 @@ async function resolveDeviceRemovalUser(req) {
 
   if (token) {
     const auth = await resolveAuthToken(token);
+    if (!auth) return res.status(401).json({ message: 'Invalid token' });
     const user = auth?.user || (auth?.userId ? await User.findById(auth.userId) : null);
     return { user, currentDeviceId: req.body.deviceId || auth?.deviceId || null };
   }
@@ -1129,6 +1130,45 @@ router.get('/me', async (req, res) => {
     res.json({ user: safeUser(user, { actorId }) });
   } catch {
     res.status(401).json({ message: 'Invalid token' });
+  }
+});
+
+router.put('/me', async (req, res) => {
+  try {
+    const token = getRequestToken(req);
+    if (!token) return res.status(401).json({ message: 'No token' });
+
+    const auth = await resolveAuthToken(token);
+    if (!auth) return res.status(401).json({ message: 'Invalid token' });
+    const user = await User.findById(auth.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const name = String(req.body.name || '').trim();
+    const normalizedPhone = req.body.phone ? normalizePhone(req.body.phone) : null;
+
+    if (!name) {
+      return res.status(400).json({ message: 'Enter your display name.' });
+    }
+
+    if (req.body.phone && !normalizedPhone) {
+      return res.status(400).json({ message: 'Enter a valid Rwanda mobile number.' });
+    }
+
+    if (normalizedPhone) {
+      const existingPhoneUser = await User.findOne({ phone: normalizedPhone, _id: { $ne: user._id } });
+      if (existingPhoneUser) {
+        return res.status(400).json({ message: 'Phone number already in use.' });
+      }
+    }
+
+    user.name = name;
+    user.phone = normalizedPhone || undefined;
+    await user.save();
+
+    const actorId = await findActorId(user);
+    res.json({ user: safeUser(user, { actorId }) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 
