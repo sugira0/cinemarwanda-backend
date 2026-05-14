@@ -68,6 +68,9 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/streams', require('./routes/streams'));
+app.use('/api/settings', require('./routes/settings'));
+app.use('/api/plans',    require('./routes/plans'));
+app.use('/api/presence', require('./routes/presence'));
 
 app.get('/', (req, res) => res.json({ status: 'CINEMA Rwanda API running', version: '1.0' }));
 

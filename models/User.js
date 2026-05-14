@@ -42,6 +42,13 @@ const userSchema = new mongoose.Schema({
     initiatedAt:       { type: Date, default: Date.now }
   },
   watchlist:[{ type: mongoose.Schema.Types.ObjectId, ref: 'Movie' }],
+  purchasedContent: [{
+    movieId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Movie' },
+    episodeId: { type: String, default: null }, // null = full movie
+    paidAt:    { type: Date, default: Date.now },
+    amount:    { type: Number },
+    reference: { type: String },
+  }],
   resetToken:       { type: String },
   resetTokenExpiry: { type: Date },
   subscription: {

@@ -1,9 +1,9 @@
 const dotenv = require('dotenv');
+dotenv.config(); // Must run before any module that reads process.env
+
 const app = require('./app');
 const { connectToDatabase } = require('./db');
 const seed = require('./seed');
-
-dotenv.config();
 
 connectToDatabase()
   .then(async () => {

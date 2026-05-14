@@ -23,7 +23,7 @@ const {
   isOtpExpired,
 } = require('../utils/oneTimePassword');
 const { sendDeviceRemovalWhatsapp } = require('../utils/whatsapp');
-const { getRequestToken, resolveAuthToken } = require('../middleware/auth');
+const { getRequestToken, resolveAuthToken, protect } = require('../middleware/auth');
 const {
   buildIdentifierQueries,
   isPhoneProxyEmail,
@@ -1362,6 +1362,131 @@ router.post('/reset-password', async (req, res) => {
     res.json({ message: 'Password reset successfully. You can now log in.' });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// ── PATCH change password (authenticated) ────────────────────────────────────
+router.patch('/change-password', protect, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current and new password are required.' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ message: 'New password must be at least 8 characters.' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    const match = await bcrypt.compare(currentPassword, user.password || '');
+    if (!match) return res.status(400).json({ message: 'Current password is incorrect.' });
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+    res.json({ message: 'Password changed successfully.' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── Google OAuth ──────────────────────────────────────────────────────────────
+router.post('/google', async (req, res) => {
+  try {
+    const { OAuth2Client } = require('google-auth-library');
+    const { credential, googleUserInfo, deviceId, deviceName } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({ message: 'Google credential is required.' });
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(500).json({ message: 'Google OAuth is not configured on the server.' });
+    }
+
+    let googleId, email, name, picture;
+
+    // Path 1: ID token (web) — verify with Google
+    // Path 2: Access token (mobile Expo) — use provided userInfo
+    if (googleUserInfo) {
+      // Mobile path: access token + userInfo from Google's userinfo endpoint
+      googleId = googleUserInfo.sub;
+      email    = googleUserInfo.email;
+      name     = googleUserInfo.name;
+      picture  = googleUserInfo.picture;
+
+      if (!googleId || !email) {
+        return res.status(400).json({ message: 'Invalid Google user info.' });
+      }
+    } else {
+      // Web path: verify ID token
+      const client = new OAuth2Client(clientId);
+      let ticket;
+      try {
+        ticket = await client.verifyIdToken({ idToken: credential, audience: clientId });
+      } catch {
+        return res.status(401).json({ message: 'Invalid Google token. Please try again.' });
+      }
+      const payload = ticket.getPayload();
+      googleId = payload.sub;
+      email    = payload.email;
+      name     = payload.name;
+      picture  = payload.picture;
+    }
+
+    if (!email) {
+      return res.status(400).json({ message: 'Google account must have an email address.' });
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+
+    // Find or create user
+    let user = await User.findOne({
+      $or: [{ firebaseUid: `google:${googleId}` }, { email: normalizedEmail }],
+    });
+
+    if (!user) {
+      user = await User.create({
+        firebaseUid: `google:${googleId}`,
+        name: name || normalizedEmail.split('@')[0],
+        email: normalizedEmail,
+        role: 'viewer',
+      });
+    } else {
+      if (!user.firebaseUid) {
+        user.firebaseUid = `google:${googleId}`;
+        await user.save();
+      }
+    }
+
+    if (user.status === 'suspended') {
+      return res.status(403).json({ message: 'Your account has been suspended. Contact support.' });
+    }
+
+    // Attach device
+    const resolvedDeviceId = deviceId || `dev_${Date.now()}`;
+    req.body.deviceId = resolvedDeviceId;
+    req.body.deviceName = deviceName || 'Web Browser';
+    const deviceResult = await attachDevice(user, req, resolvedDeviceId);
+
+    if (deviceResult.limited) {
+      return res.status(403).json({
+        message: `This account is already registered on ${MAX_DEVICES} devices. Remove a device to continue.`,
+        devices: deviceResult.devices,
+      });
+    }
+
+    const actorId = await findActorId(user);
+    const token = signToken(user, deviceResult.deviceId);
+
+    res.json({
+      token,
+      deviceId: deviceResult.deviceId,
+      user: safeUser(user, { actorId, avatar: picture }),
+    });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ message: err.message });
   }
 });
 

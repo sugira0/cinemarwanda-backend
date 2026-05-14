@@ -9,11 +9,28 @@ function allowDevEmailPreview() {
   return process.env.NODE_ENV !== 'production' && toBoolean(process.env.ALLOW_DEV_EMAIL_PREVIEW);
 }
 
+const PLACEHOLDER_PATTERNS = [
+  'your_email@gmail.com',
+  'your_app_password',
+  'your_gmail_app_password_here',
+  'your_app_password_here',
+  'your_emailjs_public_key_here',
+  'placeholder',
+  'changeme',
+];
+
+function isPlaceholder(value) {
+  if (!value) return true;
+  const lower = value.trim().toLowerCase();
+  return PLACEHOLDER_PATTERNS.some(p => lower.includes(p));
+}
+
 function isEmailJsConfigured() {
   return Boolean(
     process.env.EMAILJS_SERVICE_ID &&
     process.env.EMAILJS_TEMPLATE_ID &&
-    process.env.EMAILJS_PUBLIC_KEY
+    process.env.EMAILJS_PUBLIC_KEY &&
+    !isPlaceholder(process.env.EMAILJS_PUBLIC_KEY)
   );
 }
 
@@ -23,8 +40,8 @@ function isMailConfigured() {
     process.env.EMAIL_PORT &&
     process.env.EMAIL_USER &&
     process.env.EMAIL_PASS &&
-    process.env.EMAIL_USER !== 'your_email@gmail.com' &&
-    process.env.EMAIL_PASS !== 'your_app_password'
+    !isPlaceholder(process.env.EMAIL_USER) &&
+    !isPlaceholder(process.env.EMAIL_PASS)
   );
 }
 
@@ -131,14 +148,16 @@ function buildOtpEmailHtml({ name, code, purpose, deviceName, expiresInMinutes =
 
   return `
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#0a0a0a;color:#fff;padding:2rem;border-radius:12px;">
-      <p style="color:#22c55e;letter-spacing:0.18em;text-transform:uppercase;font-size:0.72rem;margin-bottom:0.8rem;">CINEMA Rwanda</p>
+      <p style="color:#f59e0b;letter-spacing:0.18em;text-transform:uppercase;font-size:0.72rem;margin-bottom:0.8rem;">CINEMA Rwanda</p>
       <h2 style="font-size:1.4rem;margin-bottom:0.5rem;">${copy.heading}</h2>
       <p style="color:#b7c2ba;margin-bottom:1rem;">Hello ${name || 'there'},</p>
       <p style="color:#d0d6d2;margin-bottom:1.25rem;line-height:1.6;">${copy.intro}</p>
-      <div style="display:inline-block;background:#151f18;border:1px solid rgba(34,197,94,0.3);padding:14px 18px;font-size:1.6rem;letter-spacing:0.35rem;font-weight:700;">
+      <div style="display:inline-block;background:#1a1500;border:1px solid rgba(245,158,11,0.4);padding:14px 28px;font-size:2rem;letter-spacing:0.45rem;font-weight:700;color:#f59e0b;border-radius:8px;">
         ${code}
       </div>
       <p style="color:#777;font-size:0.82rem;margin-top:1.25rem;line-height:1.6;">${copy.footer}</p>
+      <hr style="border:none;border-top:1px solid #1f1f1f;margin:1.5rem 0;" />
+      <p style="color:#444;font-size:0.75rem;">If you didn't request this, you can safely ignore this email.</p>
     </div>
   `;
 }
@@ -166,15 +185,21 @@ async function sendViaEmailJs(templateParams) {
 
 async function sendViaSmtp({ to, subject, html, text }) {
   if (!isMailConfigured()) {
-    if (allowDevEmailPreview()) {
-      console.log(`[dev] Email for ${to}: ${subject}`);
-      if (text) {
-        console.log(text);
-      }
-      return;
+    // Always log OTP to console in dev so you can test without real SMTP
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log(`📧  [DEV EMAIL] To: ${to}`);
+      console.log(`    Subject: ${subject}`);
+      if (text) console.log(`    Body: ${text}`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      return; // silently succeed in dev
     }
 
-    throw new Error('SMTP email delivery is not configured.');
+    throw new Error(
+      'SMTP email delivery is not configured. ' +
+      'Set EMAIL_HOST, EMAIL_PORT, EMAIL_USER, and EMAIL_PASS in your .env file. ' +
+      'For Gmail, generate an App Password at myaccount.google.com/security.'
+    );
   }
 
   await getTransporter().sendMail({
@@ -219,8 +244,8 @@ async function sendOneTimePasswordEmail({ to, name, code, purpose, deviceName, e
 }
 
 async function sendResetEmail(to, resetUrl) {
-  if (!isMailConfigured() && allowDevEmailPreview()) {
-    console.log(`[dev] Password reset email for ${to}: ${resetUrl}`);
+  if (!isMailConfigured() && process.env.NODE_ENV !== 'production') {
+    console.log(`\n📧  [DEV EMAIL] Password reset for ${to}: ${resetUrl}\n`);
     return;
   }
 
@@ -229,10 +254,11 @@ async function sendResetEmail(to, resetUrl) {
     subject: 'Reset your CINEMA Rwanda password',
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#0a0a0a;color:#fff;padding:2rem;border-radius:12px;">
+        <p style="color:#f59e0b;letter-spacing:0.18em;text-transform:uppercase;font-size:0.72rem;margin-bottom:0.8rem;">CINEMA Rwanda</p>
         <h2 style="font-size:1.4rem;margin-bottom:0.5rem;">Reset your password</h2>
         <p style="color:#888;margin-bottom:1.5rem;">Click the button below to reset your password. This link expires in <strong>1 hour</strong>.</p>
         <a href="${resetUrl}"
-          style="display:inline-block;background:#1db954;color:#000;padding:12px 28px;border-radius:8px;font-weight:700;text-decoration:none;font-size:0.95rem;">
+          style="display:inline-block;background:#f59e0b;color:#000;padding:12px 28px;border-radius:8px;font-weight:700;text-decoration:none;font-size:0.95rem;">
           Reset Password
         </a>
         <p style="color:#555;font-size:0.8rem;margin-top:1.5rem;">If you didn't request this, ignore this email. Your password won't change.</p>

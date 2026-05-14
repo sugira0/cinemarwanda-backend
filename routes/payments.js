@@ -2,17 +2,17 @@ const crypto = require('crypto');
 const router = require('express').Router();
 const Notification = require('../models/Notification');
 const Payment = require('../models/Payment');
+const SubscriptionPlan = require('../models/SubscriptionPlan');
 const User = require('../models/User');
 const { adminOnly, protect } = require('../middleware/auth');
 const { normalizePhone, publicContact } = require('../utils/authContact');
 
-const PLANS = {
-  basic: { price: 2000, days: 30, label: 'Basic' },
-  standard: { price: 5000, days: 30, label: 'Standard' },
-  premium: { price: 10000, days: 30, label: 'Premium' },
-};
-
 const PAYMENT_METHODS = new Set(['momo', 'airtel', 'card']);
+
+async function getPlan(planId) {
+  const plan = await SubscriptionPlan.findOne({ id: planId, active: true });
+  return plan || null;
+}
 
 router.get('/my', protect, async (req, res) => {
   try {
@@ -26,9 +26,10 @@ router.get('/my', protect, async (req, res) => {
 
 router.post('/initiate', protect, async (req, res) => {
   try {
-    const { plan, method, phone, cardLast4, cardName } = req.body;
-    if (!PLANS[plan]) {
-      return res.status(400).json({ message: 'Invalid plan' });
+    const { plan: planId, method, phone, cardLast4, cardName } = req.body;
+    const plan = await getPlan(planId);
+    if (!plan) {
+      return res.status(400).json({ message: 'Invalid or unavailable plan.' });
     }
 
     if (!PAYMENT_METHODS.has(method)) {
@@ -54,15 +55,15 @@ router.post('/initiate', protect, async (req, res) => {
     }
 
     const reference = `CR-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
-    const expiresAt = new Date(Date.now() + PLANS[plan].days * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000);
 
     const payment = await Payment.create({
-      userId: req.user.id,
-      userName: user.name,
+      userId:    req.user.id,
+      userName:  user.name,
       userEmail: publicContact(user),
-      plan,
+      plan:      plan.id,
       method,
-      amount: PLANS[plan].price,
+      amount:    plan.price,
       reference,
       expiresAt,
       status: 'pending',
@@ -71,13 +72,13 @@ router.post('/initiate', protect, async (req, res) => {
         : `Phone: ${paymentPhone}`,
     });
 
-    const ussd = buildUSSD(method, PLANS[plan].price, reference, paymentPhone);
+    const ussd = buildUSSD(method, plan.price, reference, paymentPhone);
 
     await Notification.create({
       userId: await getAdminId(),
       type: 'system',
       title: `New payment - ${user.name}`,
-      message: `${user.name} initiated the ${PLANS[plan].label} plan via ${method}. Ref: ${reference}`,
+      message: `${user.name} initiated the ${plan.name} plan via ${method}. Ref: ${reference}`,
       link: '/analytics',
     });
 
@@ -112,19 +113,38 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
     payment.status = 'completed';
     await payment.save();
 
-    if (payment.expiresAt) {
+    if (payment.plan === 'ppv' && payment.movieId) {
+      // Grant PPV access — add to purchasedContent
+      await User.findByIdAndUpdate(payment.userId, {
+        $push: {
+          purchasedContent: {
+            movieId:   payment.movieId,
+            episodeId: payment.episodeId || null,
+            paidAt:    new Date(),
+            amount:    payment.amount,
+            reference: payment.reference,
+          },
+        },
+      });
+      await Notification.create({
+        userId: payment.userId,
+        type: 'system',
+        title: 'Content unlocked',
+        message: `Your pay-per-view purchase is confirmed. You can now watch the content.`,
+        link: `/movies/${payment.movieId}`,
+      });
+    } else if (payment.expiresAt) {
       await User.findByIdAndUpdate(payment.userId, {
         subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
       });
+      await Notification.create({
+        userId: payment.userId,
+        type: 'system',
+        title: 'Payment confirmed',
+        message: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}.`,
+        link: '/account',
+      });
     }
-
-    await Notification.create({
-      userId: payment.userId,
-      type: 'system',
-      title: 'Payment confirmed',
-      message: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}.`,
-      link: '/account',
-    });
 
     return res.json({ message: 'Confirmed', payment });
   } catch (err) {
@@ -159,13 +179,118 @@ router.post('/:id/reject', protect, adminOnly, async (req, res) => {
 
 router.get('/', protect, adminOnly, async (req, res) => {
   try {
-    const { status, page = 1 } = req.query;
-    const query = status ? { status } : {};
-    const total = await Payment.countDocuments(query);
+    const { status, search, startDate, endDate, page = 1 } = req.query;
+    const query = {};
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { userName:  { $regex: search, $options: 'i' } },
+        { userEmail: { $regex: search, $options: 'i' } },
+        { reference: { $regex: search, $options: 'i' } },
+        { plan:      { $regex: search, $options: 'i' } },
+      ];
+    }
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(startDate);
+      if (endDate)   query.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+    }
+
+    const total    = await Payment.countDocuments(query);
     const payments = await Payment.find(query).sort({ createdAt: -1 }).skip((page - 1) * 20).limit(20);
-    return res.json({ payments, total, pages: Math.ceil(total / 20) });
+
+    // Attach phone from User for each payment
+    const userIds = [...new Set(payments.map(p => String(p.userId)))];
+    const users   = await User.find({ _id: { $in: userIds } }).select('_id phone');
+    const phoneMap = {};
+    users.forEach(u => { phoneMap[String(u._id)] = u.phone || null; });
+
+    const enriched = payments.map(p => ({
+      ...p.toObject(),
+      userPhone: phoneMap[String(p.userId)] || null,
+    }));
+
+    // Per-plan revenue stats
+    const allPayments = await Payment.find({ status: 'completed' }).select('plan amount');
+    const planStats = {};
+    allPayments.forEach(p => {
+      if (!planStats[p.plan]) planStats[p.plan] = { revenue: 0, count: 0 };
+      planStats[p.plan].revenue += p.amount;
+      planStats[p.plan].count  += 1;
+    });
+
+    return res.json({ payments: enriched, total, pages: Math.ceil(total / 20), planStats });
   } catch (err) {
     return res.status(500).json({ message: err.message });
+  }
+});
+
+// ── POST initiate PPV (pay per movie/episode) ─────────────────────────────────
+router.post('/ppv', protect, async (req, res) => {
+  try {
+    const { movieId, episodeId, method, phone } = req.body;
+    if (!movieId) return res.status(400).json({ message: 'movieId is required.' });
+
+    const PPV_PRICE = 100; // RWF per movie or episode
+    const user = await User.findById(req.user.id);
+
+    // Check if already purchased
+    const alreadyBought = user.purchasedContent?.some(p =>
+      String(p.movieId) === String(movieId) &&
+      (episodeId ? p.episodeId === episodeId : !p.episodeId)
+    );
+    if (alreadyBought) {
+      return res.status(400).json({ message: 'You have already purchased this content.' });
+    }
+
+    if (!PAYMENT_METHODS.has(method)) {
+      return res.status(400).json({ message: 'Unsupported payment method.' });
+    }
+
+    const submittedPhone = normalizePhone(phone);
+    const paymentPhone   = user?.phone || submittedPhone;
+    if (method !== 'card' && !paymentPhone) {
+      return res.status(400).json({ message: 'Add a valid Rwanda mobile number to your account first.' });
+    }
+    if (method !== 'card' && !user.phone && submittedPhone) {
+      user.phone = submittedPhone;
+      await user.save();
+    }
+
+    const reference = `CR-PPV-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+    const payment = await Payment.create({
+      userId:    req.user.id,
+      userName:  user.name,
+      userEmail: publicContact(user),
+      plan:      'ppv',
+      amount:    PPV_PRICE,
+      method,
+      reference,
+      movieId,
+      episodeId: episodeId || null,
+      status:    'pending',
+      notes:     `PPV: ${episodeId ? 'episode' : 'movie'} ${movieId}`,
+    });
+
+    const ussd = buildUSSD(method, PPV_PRICE, reference, paymentPhone);
+    return res.status(201).json({ payment, ussd, reference });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+// ── GET check PPV access ──────────────────────────────────────────────────────
+router.get('/ppv/check/:movieId', protect, async (req, res) => {
+  try {
+    const { episodeId } = req.query;
+    const user = await User.findById(req.user.id).select('purchasedContent');
+    const hasPurchased = user?.purchasedContent?.some(p =>
+      String(p.movieId) === String(req.params.movieId) &&
+      (episodeId ? p.episodeId === episodeId : !p.episodeId)
+    );
+    res.json({ purchased: Boolean(hasPurchased) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 
