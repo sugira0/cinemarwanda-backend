@@ -11,7 +11,9 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@better-auth/cli": "^1.4.21",
     "bcryptjs": "^2.4.3",
+    "better-auth": "^1.6.11",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
