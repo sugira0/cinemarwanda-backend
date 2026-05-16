@@ -6,6 +6,7 @@ const SubscriptionPlan = require('../models/SubscriptionPlan');
 const User = require('../models/User');
 const { adminOnly, protect } = require('../middleware/auth');
 const { normalizePhone, publicContact } = require('../utils/authContact');
+const { sendPushToUsers } = require('../utils/pushNotification');
 
 const PAYMENT_METHODS = new Set(['momo', 'airtel', 'card']);
 
@@ -114,7 +115,6 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
     await payment.save();
 
     if (payment.plan === 'ppv' && payment.movieId) {
-      // Grant PPV access — add to purchasedContent
       await User.findByIdAndUpdate(payment.userId, {
         $push: {
           purchasedContent: {
@@ -133,6 +133,14 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
         message: `Your pay-per-view purchase is confirmed. You can now watch the content.`,
         link: `/movies/${payment.movieId}`,
       });
+      // Push notification
+      sendPushToUsers({
+        userIds: [String(payment.userId)],
+        title: '🎬 Content Unlocked!',
+        body: 'Your pay-per-view purchase is confirmed. Tap to watch now.',
+        type: 'system',
+        link: `/movies/${payment.movieId}`,
+      }).catch(() => {});
     } else if (payment.expiresAt) {
       await User.findByIdAndUpdate(payment.userId, {
         subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
@@ -144,6 +152,14 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
         message: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}.`,
         link: '/account',
       });
+      // Push notification
+      sendPushToUsers({
+        userIds: [String(payment.userId)],
+        title: '✅ Subscription Activated!',
+        body: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}. Enjoy unlimited streaming!`,
+        type: 'system',
+        link: '/account',
+      }).catch(() => {});
     }
 
     return res.json({ message: 'Confirmed', payment });

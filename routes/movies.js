@@ -4,6 +4,7 @@ const Stream = require('../models/Stream');
 const { protect, authorOrAdmin, getRequestToken, resolveAuthToken } = require('../middleware/auth');
 const { requireSubscription } = require('../middleware/subscription');
 const { uploadAsset, deleteStoredAsset, upload } = require('../utils/storage');
+const { broadcastPush } = require('../utils/pushNotification');
 
 const ACTIVE_STREAM_WINDOW_MS = 60000;
 
@@ -315,6 +316,17 @@ router.post(
         cast: cast ? cast.split(',').map((value) => value.trim()).filter(Boolean) : [],
         authorId: req.user.id,
       });
+
+      // ── Push notification to all users about new movie ──────────────────
+      broadcastPush({
+        title: `🎬 New ${movie.type === 'series' ? 'Series' : 'Film'}: ${movie.title}`,
+        body: movie.description
+          ? movie.description.slice(0, 100) + (movie.description.length > 100 ? '...' : '')
+          : 'A new title just dropped on CINEMA Rwanda. Watch it now!',
+        type: 'new_movie',
+        link: `/movies/${movie._id}`,
+        data: { movieId: String(movie._id) },
+      }).catch(() => {}); // fire-and-forget
 
       return res.status(201).json(movie);
     } catch (err) {

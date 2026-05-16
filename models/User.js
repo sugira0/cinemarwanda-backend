@@ -49,6 +49,12 @@ const userSchema = new mongoose.Schema({
     amount:    { type: Number },
     reference: { type: String },
   }],
+  // ── Push notification tokens (FCM) ────────────────────────────────────────
+  pushTokens: [{
+    token:    { type: String, required: true },
+    platform: { type: String, enum: ['android', 'ios', 'web'], default: 'android' },
+    addedAt:  { type: Date, default: Date.now },
+  }],
   resetToken:       { type: String },
   resetTokenExpiry: { type: Date },
   subscription: {
