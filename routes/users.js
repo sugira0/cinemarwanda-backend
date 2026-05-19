@@ -179,14 +179,18 @@ router.post('/broadcast', protect, adminOnly, async (req, res) => {
     const { title, message, link, role } = req.body;
     if (!title) return res.status(400).json({ message: 'Title required' });
 
-    const query = role ? { role } : {};
-    const users = await User.find(query).select('_id');
+    const { broadcastPush } = require('../utils/pushNotification');
 
-    await Notification.insertMany(users.map(u => ({
-      userId: u._id, type: 'system', title, message, link: link || '/'
-    })));
+    // Send in-app + push notifications
+    const result = await broadcastPush({
+      title,
+      body: message || '',
+      type: 'system',
+      link: link || '/',
+      role: role || null,
+    });
 
-    res.json({ message: `Notification sent to ${users.length} users` });
+    res.json({ message: `Notification sent to ${result.sent} users` });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
