@@ -5,6 +5,7 @@ const compression = require('compression');
 const rateLimit  = require('express-rate-limit');
 const dotenv     = require('dotenv');
 const { getUploadPath, isImageFile } = require('./utils/media');
+const { maintenanceGuard } = require('./middleware/settings');
 
 dotenv.config();
 
@@ -26,19 +27,21 @@ app.use(express.json({ limit: '10mb' }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false }, // we handle proxy trust ourselves
   message: { message: 'Too many requests, please try again later.' },
   skip: (req) => req.method === 'OPTIONS',
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30, // stricter for auth endpoints
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: { message: 'Too many auth attempts, please try again later.' },
 });
 
@@ -76,15 +79,15 @@ if (process.env.NODE_ENV !== 'production') {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth',          require('./routes/auth'));
-app.use('/api/movies',        require('./routes/movies'));
-app.use('/api/watchlist',     require('./routes/watchlist'));
-app.use('/api/actors',        require('./routes/actors'));
-app.use('/api/comments',      require('./routes/comments'));
-app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/analytics',     require('./routes/analytics'));
-app.use('/api/payments',      require('./routes/payments'));
-app.use('/api/users',         require('./routes/users'));
-app.use('/api/streams',       require('./routes/streams'));
+app.use('/api/movies',        maintenanceGuard, require('./routes/movies'));
+app.use('/api/watchlist',     maintenanceGuard, require('./routes/watchlist'));
+app.use('/api/actors',        maintenanceGuard, require('./routes/actors'));
+app.use('/api/comments',      maintenanceGuard, require('./routes/comments'));
+app.use('/api/notifications', maintenanceGuard, require('./routes/notifications'));
+app.use('/api/analytics',     maintenanceGuard, require('./routes/analytics'));
+app.use('/api/payments',      maintenanceGuard, require('./routes/payments'));
+app.use('/api/users',         maintenanceGuard, require('./routes/users'));
+app.use('/api/streams',       maintenanceGuard, require('./routes/streams'));
 app.use('/api/settings',      require('./routes/settings'));
 app.use('/api/plans',         require('./routes/plans'));
 app.use('/api/presence',      require('./routes/presence'));

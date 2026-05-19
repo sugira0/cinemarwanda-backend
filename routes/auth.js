@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Actor = require('../models/Actor');
 const AuthOtp = require('../models/AuthOtp');
+const { registrationGuard } = require('../middleware/settings');
 const { sendDeviceRemovalEmail, sendOneTimePasswordEmail } = require('../utils/mailer');
 const {
   EXPIRY_MINUTES,
@@ -344,7 +345,7 @@ router.post('/firebase/session', async (req, res) => {
   }
 });
 
-router.post('/firebase/register', async (req, res) => {
+router.post('/firebase/register', registrationGuard, async (req, res) => {
   try {
     const normalizedEmail = normalizeEmail(req.body.email);
     const password = String(req.body.password || '');
@@ -416,7 +417,7 @@ router.post('/firebase/register', async (req, res) => {
   }
 });
 
-router.post('/firebase/register/request-otp', async (req, res) => {
+router.post('/firebase/register/request-otp', registrationGuard, async (req, res) => {
   try {
     const {
       name,
@@ -656,7 +657,7 @@ async function incrementOtpAttempts(record, tooManyAttemptsMessage) {
   return null;
 }
 
-router.post('/register/request-otp', async (req, res) => {
+router.post('/register/request-otp', registrationGuard, async (req, res) => {
   try {
     const {
       name,

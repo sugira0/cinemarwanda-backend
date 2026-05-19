@@ -3,6 +3,7 @@ const bcrypt  = require('bcryptjs');
 const User    = require('../models/User');
 const Settings = require('../models/Settings');
 const { protect, adminOnly } = require('../middleware/auth');
+const { invalidateSettingsCache } = require('../middleware/settings');
 
 // Default values — used when no settings doc exists yet
 const DEFAULTS = {
@@ -72,6 +73,7 @@ router.patch('/platform', protect, adminOnly, async (req, res) => {
       ...(req.body.allowRegistrations !== undefined && { allowRegistrations: Boolean(req.body.allowRegistrations) }),
     };
     await Settings.set('platform', updated);
+    invalidateSettingsCache(); // clear cache so changes take effect immediately
     res.json({ message: 'Platform settings saved.', platform: updated });
   } catch (err) {
     res.status(500).json({ message: err.message });
