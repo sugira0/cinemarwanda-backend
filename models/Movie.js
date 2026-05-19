@@ -29,12 +29,15 @@ const movieSchema = new mongoose.Schema({
   authorId:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }
 }, { timestamps: true });
 
-// Indexes for fast queries
+// ── Indexes ───────────────────────────────────────────────────────────────────
 movieSchema.index({ featured: 1 });
 movieSchema.index({ genre: 1 });
 movieSchema.index({ type: 1 });
 movieSchema.index({ views: -1 });
 movieSchema.index({ createdAt: -1 });
+movieSchema.index({ authorId: 1, createdAt: -1 }); // author's films sorted by date
+movieSchema.index({ featured: 1, createdAt: -1 }); // featured films
+movieSchema.index({ type: 1, createdAt: -1 });     // browse by type
 movieSchema.index({ title: 'text', description: 'text' }, { default_language: 'none', language_override: 'lang_override' });
 
 module.exports = mongoose.model('Movie', movieSchema);

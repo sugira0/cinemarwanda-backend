@@ -1,7 +1,9 @@
-const express = require('express');
-const fs = require('fs');
-const cors = require('cors');
-const dotenv = require('dotenv');
+const express    = require('express');
+const fs         = require('fs');
+const cors       = require('cors');
+const compression = require('compression');
+const rateLimit  = require('express-rate-limit');
+const dotenv     = require('dotenv');
 const { getUploadPath, isImageFile } = require('./utils/media');
 
 dotenv.config();
@@ -10,22 +12,42 @@ const app = express();
 
 app.set('trust proxy', true);
 
+// ── Gzip compression for all responses ───────────────────────────────────────
+app.use(compression({ level: 6, threshold: 1024 }));
+
+// ── CORS ─────────────────────────────────────────────────────────────────────
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }));
 
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  return next();
+app.use(express.json({ limit: '10mb' }));
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests, please try again later.' },
+  skip: (req) => req.method === 'OPTIONS',
 });
 
-app.use(express.json());
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30, // stricter for auth endpoints
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many auth attempts, please try again later.' },
+});
 
+app.use('/api/', generalLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/firebase', authLimiter);
+
+// ── Static uploads ────────────────────────────────────────────────────────────
 function sendUploadedImage(req, res) {
   if (!isImageFile(req.params.filename)) {
     return res.status(404).json({ message: 'File not found' });
@@ -34,34 +56,45 @@ function sendUploadedImage(req, res) {
   if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).json({ message: 'File not found' });
   }
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
   return res.sendFile(filePath);
 }
 
 app.get('/uploads/:filename', sendUploadedImage);
 app.get('/api/uploads/:filename', sendUploadedImage);
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    console.log(`${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`);
+// ── Request logger ────────────────────────────────────────────────────────────
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      console.log(`${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - start}ms)`);
+    });
+    next();
   });
-  next();
-});
+}
 
-app.use('/api/auth',         require('./routes/auth'));
-app.use('/api/movies',       require('./routes/movies'));
-app.use('/api/watchlist',    require('./routes/watchlist'));
-app.use('/api/actors',       require('./routes/actors'));
-app.use('/api/comments',     require('./routes/comments'));
-app.use('/api/notifications',require('./routes/notifications'));
-app.use('/api/analytics',    require('./routes/analytics'));
-app.use('/api/payments',     require('./routes/payments'));
-app.use('/api/users',        require('./routes/users'));
-app.use('/api/streams',      require('./routes/streams'));
-app.use('/api/settings',     require('./routes/settings'));
-app.use('/api/plans',        require('./routes/plans'));
-app.use('/api/presence',     require('./routes/presence'));
+// ── Routes ────────────────────────────────────────────────────────────────────
+app.use('/api/auth',          require('./routes/auth'));
+app.use('/api/movies',        require('./routes/movies'));
+app.use('/api/watchlist',     require('./routes/watchlist'));
+app.use('/api/actors',        require('./routes/actors'));
+app.use('/api/comments',      require('./routes/comments'));
+app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/analytics',     require('./routes/analytics'));
+app.use('/api/payments',      require('./routes/payments'));
+app.use('/api/users',         require('./routes/users'));
+app.use('/api/streams',       require('./routes/streams'));
+app.use('/api/settings',      require('./routes/settings'));
+app.use('/api/plans',         require('./routes/plans'));
+app.use('/api/presence',      require('./routes/presence'));
 
 app.get('/', (req, res) => res.json({ status: 'CINEMA Rwanda API running', version: '1.0' }));
+
+// ── Global error handler ──────────────────────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
+});
 
 module.exports = app;

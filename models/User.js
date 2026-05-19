@@ -64,4 +64,12 @@ const userSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// ── Indexes ───────────────────────────────────────────────────────────────────
+userSchema.index({ role: 1 });
+userSchema.index({ status: 1 });
+userSchema.index({ 'subscription.active': 1 });
+userSchema.index({ 'subscription.plan': 1 });
+userSchema.index({ resetToken: 1 }, { sparse: true });
+userSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model('User', userSchema);
