@@ -1,9 +1,9 @@
-const express    = require('express');
-const fs         = require('fs');
-const cors       = require('cors');
+const express = require('express');
+const fs = require('fs');
+const cors = require('cors');
 const compression = require('compression');
-const rateLimit  = require('express-rate-limit');
-const dotenv     = require('dotenv');
+const rateLimit = require('express-rate-limit');
+const dotenv = require('dotenv');
 const { getUploadPath, isImageFile } = require('./utils/media');
 const { maintenanceGuard } = require('./middleware/settings');
 
@@ -78,19 +78,20 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-app.use('/api/auth',          require('./routes/auth'));
-app.use('/api/movies',        maintenanceGuard, require('./routes/movies'));
-app.use('/api/watchlist',     maintenanceGuard, require('./routes/watchlist'));
-app.use('/api/actors',        maintenanceGuard, require('./routes/actors'));
-app.use('/api/comments',      maintenanceGuard, require('./routes/comments'));
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/movies', maintenanceGuard, require('./routes/movies'));
+app.use('/api/watchlist', maintenanceGuard, require('./routes/watchlist'));
+app.use('/api/actors', maintenanceGuard, require('./routes/actors'));
+app.use('/api/comments', maintenanceGuard, require('./routes/comments'));
 app.use('/api/notifications', maintenanceGuard, require('./routes/notifications'));
-app.use('/api/analytics',     maintenanceGuard, require('./routes/analytics'));
-app.use('/api/payments',      maintenanceGuard, require('./routes/payments'));
-app.use('/api/users',         maintenanceGuard, require('./routes/users'));
-app.use('/api/streams',       maintenanceGuard, require('./routes/streams'));
-app.use('/api/settings',      require('./routes/settings'));
-app.use('/api/plans',         require('./routes/plans'));
-app.use('/api/presence',      require('./routes/presence'));
+app.use('/api/analytics', maintenanceGuard, require('./routes/analytics'));
+app.use('/api/payments', maintenanceGuard, require('./routes/payments'));
+app.use('/api/users', maintenanceGuard, require('./routes/users'));
+app.use('/api/streams', maintenanceGuard, require('./routes/streams'));
+app.use('/api/settings', require('./routes/settings'));
+app.use('/api/plans', require('./routes/plans'));
+app.use('/api/presence', require('./routes/presence'));
+app.use('/api/bulk', maintenanceGuard, require('./routes/bulk'));
 
 app.get('/', (req, res) => res.json({ status: 'CINEMA Rwanda API running', version: '1.0' }));
 

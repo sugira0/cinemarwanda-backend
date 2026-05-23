@@ -166,6 +166,8 @@ async function uploadToCloudinary(file, { folder, resourceType }) {
 const upload = multer({ storage: multer.memoryStorage() });
 
 async function saveLocalUpload(file) {
+  // On serverless platforms without persistent disk (e.g. Vercel), local uploads
+  // are not supported. Render has persistent disk so this is no longer an issue.
   if (process.env.VERCEL) {
     throw new Error(
       'File uploads on Vercel require persistent storage. Configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET, or upload by external URL.'

@@ -20,7 +20,7 @@ async function getAuth() {
   const db = client.db();
 
   const baseURL = process.env.BETTER_AUTH_URL || 'http://localhost:5000';
-  const secret  = process.env.BETTER_AUTH_SECRET || process.env.JWT_SECRET || 'fallback_secret';
+  const secret = process.env.BETTER_AUTH_SECRET || process.env.JWT_SECRET || 'fallback_secret';
 
   _auth = betterAuth({
     database: mongodbAdapter(db),
@@ -31,6 +31,7 @@ async function getAuth() {
       'http://localhost:5173',
       'http://localhost:8081',
       'https://cinemarwandafront-end.vercel.app',
+      'https://cinemarwanda-backend.onrender.com',
       'https://auth.expo.io',
     ],
 
@@ -42,7 +43,7 @@ async function getAuth() {
 
     socialProviders: {
       google: {
-        clientId:     process.env.GOOGLE_CLIENT_ID     || '',
+        clientId: process.env.GOOGLE_CLIENT_ID || '',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
       },
     },
@@ -54,8 +55,8 @@ async function getAuth() {
 
     user: {
       additionalFields: {
-        phone:  { type: 'string', required: false, defaultValue: '' },
-        role:   { type: 'string', required: false, defaultValue: 'viewer' },
+        phone: { type: 'string', required: false, defaultValue: '' },
+        role: { type: 'string', required: false, defaultValue: 'viewer' },
         status: { type: 'string', required: false, defaultValue: 'active' },
       },
     },
