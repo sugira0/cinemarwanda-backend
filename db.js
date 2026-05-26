@@ -56,10 +56,12 @@ async function connectToDatabase() {
   if (!connectionPromise) {
     configureMongoDns();
     connectionPromise = mongoose.connect(process.env.MONGO_URI, {
-      maxPoolSize: 10,
+      maxPoolSize: 20,
+      minPoolSize: 5,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
       connectTimeoutMS: 10000,
+      heartbeatFrequencyMS: 10000,
     })
       .then(() => mongoose.connection)
       .catch((error) => {

@@ -13,6 +13,45 @@ const app = express();
 
 app.set('trust proxy', true);
 
+// ── In-memory cache for hot read endpoints ────────────────────────────────────
+const _cache = new Map();
+const CACHE_TTL = {
+  short: 30 * 1000,
+  medium: 2 * 60 * 1000,
+  long: 10 * 60 * 1000,
+};
+
+function cacheMiddleware(ttl) {
+  return (req, res, next) => {
+    if (req.method !== 'GET') return next();
+    // Don't cache authenticated requests (user-specific data)
+    if (req.headers.authorization) return next();
+    const key = req.originalUrl;
+    const hit = _cache.get(key);
+    if (hit && Date.now() - hit.ts < ttl) {
+      res.set('X-Cache', 'HIT');
+      return res.json(hit.data);
+    }
+    const origJson = res.json.bind(res);
+    res.json = (data) => {
+      if (res.statusCode === 200) _cache.set(key, { data, ts: Date.now() });
+      return origJson(data);
+    };
+    next();
+  };
+}
+
+// Prune stale cache entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of _cache.entries()) {
+    if (now - val.ts > CACHE_TTL.long) _cache.delete(key);
+  }
+}, 5 * 60 * 1000).unref();
+
+app.locals.cacheMiddleware = cacheMiddleware;
+app.locals.CACHE_TTL = CACHE_TTL;
+
 // ── Gzip compression for all responses ───────────────────────────────────────
 app.use(compression({ level: 6, threshold: 1024 }));
 
@@ -79,17 +118,17 @@ if (process.env.NODE_ENV !== 'production') {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/movies', maintenanceGuard, require('./routes/movies'));
+app.use('/api/movies', maintenanceGuard, cacheMiddleware(CACHE_TTL.medium), require('./routes/movies'));
 app.use('/api/watchlist', maintenanceGuard, require('./routes/watchlist'));
-app.use('/api/actors', maintenanceGuard, require('./routes/actors'));
+app.use('/api/actors', maintenanceGuard, cacheMiddleware(CACHE_TTL.medium), require('./routes/actors'));
 app.use('/api/comments', maintenanceGuard, require('./routes/comments'));
 app.use('/api/notifications', maintenanceGuard, require('./routes/notifications'));
 app.use('/api/analytics', maintenanceGuard, require('./routes/analytics'));
 app.use('/api/payments', maintenanceGuard, require('./routes/payments'));
 app.use('/api/users', maintenanceGuard, require('./routes/users'));
 app.use('/api/streams', maintenanceGuard, require('./routes/streams'));
-app.use('/api/settings', require('./routes/settings'));
-app.use('/api/plans', require('./routes/plans'));
+app.use('/api/settings', cacheMiddleware(CACHE_TTL.long), require('./routes/settings'));
+app.use('/api/plans', cacheMiddleware(CACHE_TTL.long), require('./routes/plans'));
 app.use('/api/presence', require('./routes/presence'));
 app.use('/api/bulk', maintenanceGuard, require('./routes/bulk'));
 
