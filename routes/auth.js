@@ -406,8 +406,8 @@ router.post('/firebase/register', registrationGuard, async (req, res) => {
       message: !createdAccount
         ? 'This email already had an account, so we signed you in.'
         : verificationEmailSent
-        ? 'Your account was created. Firebase sent a verification link to your email.'
-        : 'Your account was created, but Firebase could not send the verification email. You can still sign in while we check the email template settings.',
+          ? 'Your account was created. Firebase sent a verification link to your email.'
+          : 'Your account was created, but Firebase could not send the verification email. You can still sign in while we check the email template settings.',
     });
   } catch (err) {
     res.status(err.statusCode || 500).json({
@@ -1413,9 +1413,9 @@ router.post('/google', async (req, res) => {
     if (googleUserInfo) {
       // Mobile path: access token + userInfo from Google's userinfo endpoint
       googleId = googleUserInfo.sub;
-      email    = googleUserInfo.email;
-      name     = googleUserInfo.name;
-      picture  = googleUserInfo.picture;
+      email = googleUserInfo.email;
+      name = googleUserInfo.name;
+      picture = googleUserInfo.picture;
 
       if (!googleId || !email) {
         return res.status(400).json({ message: 'Invalid Google user info.' });
@@ -1431,9 +1431,9 @@ router.post('/google', async (req, res) => {
       }
       const payload = ticket.getPayload();
       googleId = payload.sub;
-      email    = payload.email;
-      name     = payload.name;
-      picture  = payload.picture;
+      email = payload.email;
+      name = payload.name;
+      picture = payload.picture;
     }
 
     if (!email) {
@@ -1488,6 +1488,20 @@ router.post('/google', async (req, res) => {
     });
   } catch (err) {
     res.status(err.statusCode || 500).json({ message: err.message });
+  }
+});
+
+// ── DELETE own account ────────────────────────────────────────────────────────
+router.delete('/me', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.role === 'admin') return res.status(403).json({ message: 'Admin accounts cannot be self-deleted.' });
+
+    await User.findByIdAndDelete(req.user.id);
+    res.json({ message: 'Account deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 
