@@ -1,6 +1,6 @@
-const router  = require('express').Router();
-const bcrypt  = require('bcryptjs');
-const User    = require('../models/User');
+const router = require('express').Router();
+const bcrypt = require('bcryptjs');
+const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { protect, adminOnly } = require('../middleware/auth');
 const { invalidateSettingsCache } = require('../middleware/settings');
@@ -8,39 +8,39 @@ const { invalidateSettingsCache } = require('../middleware/settings');
 // Default values — used when no settings doc exists yet
 const DEFAULTS = {
   platform: {
-    siteName:           'CINEMA Rwanda',
-    freeEpisodes:       2,
-    maintenanceMode:    false,
+    siteName: 'CINEMA Rwanda',
+    freeEpisodes: 2,
+    maintenanceMode: false,
     allowRegistrations: true,
   },
   plans: {
-    basic:    { price: 2000,  durationDays: 30 },
-    standard: { price: 5000,  durationDays: 30 },
-    premium:  { price: 10000, durationDays: 30 },
+    basic: { price: 2000, durationDays: 30 },
+    standard: { price: 5000, durationDays: 30 },
+    premium: { price: 10000, durationDays: 30 },
   },
   contact: {
-    email:     'rwandancinema@gmail.com',
-    whatsapp:  '+250 786 666 111',
-    phone:     '+250 786 666 111',
-    website:   'https://cinemarwanda.com',
+    email: 'rwandancinema@gmail.com',
+    whatsapp: '+250 786 666 111',
+    phone: '+250 786 666 111',
+    website: 'https://cinemarwanda.com',
   },
   notifications: {
-    newReleases:           true,
+    newReleases: true,
     subscriptionReminders: true,
-    promotions:            false,
-    systemUpdates:         true,
+    promotions: false,
+    systemUpdates: true,
   },
   content: {
-    terms:     'By using CINEMA Rwanda, you agree to our terms of service. You may not reproduce, distribute, or create derivative works from our content without explicit permission.\n\nSubscriptions are billed monthly and can be cancelled at any time. Refunds are issued at our discretion.\n\nWe reserve the right to suspend accounts that violate our community guidelines.\n\nFor questions, contact rwandancinema@gmail.com',
-    help:      'Frequently Asked Questions\n\n• How do I subscribe?\nGo to the Plans tab and choose a plan. Pay via MTN MoMo or Airtel Money.\n\n• Why can\'t I watch a film?\nYou need an active subscription. Episodes 1 & 2 of any series are free.\n\n• How do I cancel?\nSubscriptions expire automatically. Simply don\'t renew.\n\n• I paid but my plan isn\'t active?\nPayments are confirmed manually within 24 hours. Contact support if it takes longer.\n\n• How do I change my password?\nGo to Profile → Security → Change Password.',
+    terms: 'By using CINEMA Rwanda, you agree to our terms of service. You may not reproduce, distribute, or create derivative works from our content without explicit permission.\n\nSubscriptions are billed monthly and can be cancelled at any time. Refunds are issued at our discretion.\n\nWe reserve the right to suspend accounts that violate our community guidelines.\n\nFor questions, contact rwandancinema@gmail.com',
+    help: 'Frequently Asked Questions\n\n• How do I subscribe?\nGo to the Plans tab and choose a plan. Pay via MTN MoMo or Airtel Money.\n\n• Why can\'t I watch a film?\nYou need an active subscription. Episodes 1 & 2 of any series are free.\n\n• How do I cancel?\nSubscriptions expire automatically. Simply don\'t renew.\n\n• I paid but my plan isn\'t active?\nPayments are confirmed manually within 24 hours. Contact support if it takes longer.\n\n• How do I change my password?\nGo to Profile → Security → Change Password.',
     ownership: 'Your CINEMA Rwanda account is personal and non-transferable.\n\nYou are responsible for all activity on your account. Do not share your login credentials.\n\nIf you believe your account has been compromised, change your password immediately and contact support.\n\nAccounts are limited to 2 registered devices at a time.',
-    invite:    'Join me on CINEMA Rwanda! Watch the best Rwandan movies & series.\n\nhttps://cinemarwanda.com',
+    invite: 'Join me on CINEMA Rwanda! Watch the best Rwandan movies & series.\n\nhttps://cinemarwanda.com',
   },
   languages: [
-    { code: 'en', label: 'English (US)', native: 'English',      active: true  },
-    { code: 'rw', label: 'Kinyarwanda',  native: 'Ikinyarwanda', active: true  },
-    { code: 'fr', label: 'French',       native: 'Français',     active: true  },
-    { code: 'sw', label: 'Swahili',      native: 'Kiswahili',    active: false },
+    { code: 'en', label: 'English (US)', native: 'English', active: true },
+    { code: 'rw', label: 'Kinyarwanda', native: 'Ikinyarwanda', active: true },
+    { code: 'fr', label: 'French', native: 'Français', active: true },
+    { code: 'sw', label: 'Swahili', native: 'Kiswahili', active: false },
   ],
 };
 
@@ -48,12 +48,12 @@ const DEFAULTS = {
 router.get('/', protect, adminOnly, async (req, res) => {
   try {
     const [platform, plans, contact, notifications, content, languages] = await Promise.all([
-      Settings.get('platform',      DEFAULTS.platform),
-      Settings.get('plans',         DEFAULTS.plans),
-      Settings.get('contact',       DEFAULTS.contact),
+      Settings.get('platform', DEFAULTS.platform),
+      Settings.get('plans', DEFAULTS.plans),
+      Settings.get('contact', DEFAULTS.contact),
       Settings.get('notifications', DEFAULTS.notifications),
-      Settings.get('content',       DEFAULTS.content),
-      Settings.get('languages',     DEFAULTS.languages),
+      Settings.get('content', DEFAULTS.content),
+      Settings.get('languages', DEFAULTS.languages),
     ]);
     res.json({ platform, plans, contact, notifications, content, languages });
   } catch (err) {
@@ -67,9 +67,9 @@ router.patch('/platform', protect, adminOnly, async (req, res) => {
     const current = await Settings.get('platform', DEFAULTS.platform);
     const updated = {
       ...current,
-      ...(req.body.siteName           !== undefined && { siteName:           String(req.body.siteName).trim() }),
-      ...(req.body.freeEpisodes       !== undefined && { freeEpisodes:       Math.max(0, Number(req.body.freeEpisodes)) }),
-      ...(req.body.maintenanceMode    !== undefined && { maintenanceMode:    Boolean(req.body.maintenanceMode) }),
+      ...(req.body.siteName !== undefined && { siteName: String(req.body.siteName).trim() }),
+      ...(req.body.freeEpisodes !== undefined && { freeEpisodes: Math.max(0, Number(req.body.freeEpisodes)) }),
+      ...(req.body.maintenanceMode !== undefined && { maintenanceMode: Boolean(req.body.maintenanceMode) }),
       ...(req.body.allowRegistrations !== undefined && { allowRegistrations: Boolean(req.body.allowRegistrations) }),
     };
     await Settings.set('platform', updated);
@@ -90,7 +90,7 @@ router.patch('/plans', protect, adminOnly, async (req, res) => {
       if (req.body[planId]) {
         const { price, durationDays } = req.body[planId];
         updated[planId] = {
-          price:       price       !== undefined ? Math.max(0, Number(price))       : current[planId]?.price,
+          price: price !== undefined ? Math.max(0, Number(price)) : current[planId]?.price,
           durationDays: durationDays !== undefined ? Math.max(1, Number(durationDays)) : current[planId]?.durationDays,
         };
       }
@@ -107,18 +107,18 @@ router.patch('/plans', protect, adminOnly, async (req, res) => {
 router.get('/public', async (req, res) => {
   try {
     const [platform, plans, contact, notifications, content, languages] = await Promise.all([
-      Settings.get('platform',      DEFAULTS.platform),
-      Settings.get('plans',         DEFAULTS.plans),
-      Settings.get('contact',       DEFAULTS.contact),
+      Settings.get('platform', DEFAULTS.platform),
+      Settings.get('plans', DEFAULTS.plans),
+      Settings.get('contact', DEFAULTS.contact),
       Settings.get('notifications', DEFAULTS.notifications),
-      Settings.get('content',       DEFAULTS.content),
-      Settings.get('languages',     DEFAULTS.languages),
+      Settings.get('content', DEFAULTS.content),
+      Settings.get('languages', DEFAULTS.languages),
     ]);
     res.json({
-      freeEpisodes:       platform.freeEpisodes       ?? DEFAULTS.platform.freeEpisodes,
-      maintenanceMode:    platform.maintenanceMode     ?? false,
-      allowRegistrations: platform.allowRegistrations  ?? true,
-      siteName:           platform.siteName            ?? DEFAULTS.platform.siteName,
+      freeEpisodes: platform.freeEpisodes ?? DEFAULTS.platform.freeEpisodes,
+      maintenanceMode: platform.maintenanceMode ?? false,
+      allowRegistrations: platform.allowRegistrations ?? true,
+      siteName: platform.siteName ?? DEFAULTS.platform.siteName,
       plans,
       contact,
       notifications,
@@ -186,7 +186,7 @@ router.post('/support', async (req, res) => {
         const { resolveAuthToken } = require('../middleware/auth');
         const auth = await resolveAuthToken(authHeader.replace('Bearer ', ''));
         userId = auth?.userId || auth?.user?._id || null;
-      } catch {}
+      } catch { }
     }
 
     const msg = await SupportMessage.create({ userId, message: message.trim(), name, email, phone });
@@ -215,7 +215,7 @@ router.patch('/support/:id', protect, adminOnly, async (req, res) => {
     const msg = await SupportMessage.findById(req.params.id);
     if (!msg) return res.status(404).json({ message: 'Message not found.' });
     if (status) msg.status = status;
-    if (reply)  { msg.reply = reply; msg.repliedAt = new Date(); msg.status = 'replied'; }
+    if (reply) { msg.reply = reply; msg.repliedAt = new Date(); msg.status = 'replied'; }
     await msg.save();
     res.json({ message: 'Updated.', supportMessage: msg });
   } catch (err) { res.status(500).json({ message: err.message }); }
@@ -231,3 +231,45 @@ router.delete('/support/:id', protect, adminOnly, async (req, res) => {
 
 module.exports = router;
 module.exports.DEFAULTS = DEFAULTS;
+
+// ── App version check ─────────────────────────────────────────────────────────
+// GET /api/settings/app-version — mobile app calls this on launch
+router.get('/app-version', async (req, res) => {
+  try {
+    const version = await Settings.get('appVersion', {
+      latestVersion: '1.0.0',
+      minVersion: '1.0.0',
+      downloadUrl: 'https://expo.dev/accounts/cinemarwanda/projects/cinemarwanda/builds',
+      message: 'A new version of CINEMA Rwanda is available. Please update for the best experience.',
+      forceUpdate: false,
+    });
+    res.json(version);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PATCH /api/settings/app-version — admin updates the version info
+router.patch('/app-version', protect, adminOnly, async (req, res) => {
+  try {
+    const current = await Settings.get('appVersion', {
+      latestVersion: '1.0.0',
+      minVersion: '1.0.0',
+      downloadUrl: 'https://expo.dev/accounts/cinemarwanda/projects/cinemarwanda/builds',
+      message: 'A new version of CINEMA Rwanda is available. Please update for the best experience.',
+      forceUpdate: false,
+    });
+    const updated = {
+      ...current,
+      ...(req.body.latestVersion !== undefined && { latestVersion: String(req.body.latestVersion).trim() }),
+      ...(req.body.minVersion !== undefined && { minVersion: String(req.body.minVersion).trim() }),
+      ...(req.body.downloadUrl !== undefined && { downloadUrl: String(req.body.downloadUrl).trim() }),
+      ...(req.body.message !== undefined && { message: String(req.body.message).trim() }),
+      ...(req.body.forceUpdate !== undefined && { forceUpdate: Boolean(req.body.forceUpdate) }),
+    };
+    await Settings.set('appVersion', updated);
+    res.json({ message: 'App version updated.', appVersion: updated });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
