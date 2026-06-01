@@ -7,6 +7,7 @@ const User = require('../models/User');
 const { adminOnly, protect } = require('../middleware/auth');
 const { normalizePhone, publicContact } = require('../utils/authContact');
 const { sendPushToUsers } = require('../utils/pushNotification');
+const mtnMomo = require('../utils/mtnMomo');
 
 const PAYMENT_METHODS = new Set(['momo', 'airtel', 'card']);
 
@@ -59,12 +60,12 @@ router.post('/initiate', protect, async (req, res) => {
     const expiresAt = new Date(Date.now() + plan.durationDays * 24 * 60 * 60 * 1000);
 
     const payment = await Payment.create({
-      userId:    req.user.id,
-      userName:  user.name,
+      userId: req.user.id,
+      userName: user.name,
       userEmail: publicContact(user),
-      plan:      plan.id,
+      plan: plan.id,
       method,
-      amount:    plan.price,
+      amount: plan.price,
       reference,
       expiresAt,
       status: 'pending',
@@ -73,7 +74,29 @@ router.post('/initiate', protect, async (req, res) => {
         : `Phone: ${paymentPhone}`,
     });
 
-    const ussd = buildUSSD(method, plan.price, reference, paymentPhone);
+    // ── MTN MoMo real API ─────────────────────────────────────────────────────
+    let mtnExternalId = null;
+    let ussd = buildUSSD(method, plan.price, reference, paymentPhone);
+    let momoRequested = false;
+
+    if (method === 'momo' && paymentPhone && mtnMomo.isConfigured()) {
+      try {
+        mtnExternalId = await mtnMomo.requestToPay({
+          phone: paymentPhone,
+          amount: plan.price,
+          reference,
+          description: `${plan.name} - CINEMA Rwanda`,
+        });
+        // Save the MTN external ID so we can poll status later
+        payment.notes = `MTN ExternalId: ${mtnExternalId} | Phone: ${paymentPhone}`;
+        await payment.save();
+        momoRequested = true;
+        ussd = null; // no USSD needed — push prompt sent automatically
+      } catch (momoErr) {
+        console.error('MTN MoMo request failed, falling back to manual:', momoErr.message);
+        // Fall through to manual flow
+      }
+    }
 
     await Notification.create({
       userId: await getAdminId(),
@@ -83,7 +106,16 @@ router.post('/initiate', protect, async (req, res) => {
       link: '/analytics',
     });
 
-    return res.status(201).json({ payment, ussd, reference });
+    return res.status(201).json({
+      payment,
+      ussd,
+      reference,
+      momoRequested,
+      mtnExternalId,
+      message: momoRequested
+        ? 'A payment prompt has been sent to your phone. Approve it to activate your plan.'
+        : 'Payment initiated. Complete the MoMo request on your phone.',
+    });
   } catch (err) {
     return res.status(500).json({ message: err.message });
   }
@@ -99,6 +131,120 @@ async function getAdminId() {
   const admin = await User.findOne({ role: 'admin' }).select('_id');
   return admin?._id;
 }
+
+// ── GET check MTN payment status (poll) ───────────────────────────────────────
+router.get('/mtn/status/:paymentId', protect, async (req, res) => {
+  try {
+    const payment = await Payment.findById(req.params.paymentId);
+    if (!payment) return res.status(404).json({ message: 'Payment not found' });
+    if (String(payment.userId) !== String(req.user.id)) {
+      return res.status(403).json({ message: 'Not your payment' });
+    }
+    if (payment.status !== 'pending') {
+      return res.json({ status: payment.status, payment });
+    }
+
+    // Extract MTN external ID from notes
+    const match = payment.notes?.match(/MTN ExternalId: ([a-f0-9-]+)/i);
+    if (!match) {
+      return res.json({ status: 'pending', payment, note: 'No MTN external ID found' });
+    }
+
+    const mtnExternalId = match[1];
+    const { status: mtnStatus, reason } = await mtnMomo.checkPaymentStatus(mtnExternalId);
+
+    if (mtnStatus === 'SUCCESSFUL') {
+      // Auto-confirm the payment
+      payment.status = 'completed';
+      await payment.save();
+
+      // Activate subscription
+      if (payment.expiresAt) {
+        await User.findByIdAndUpdate(payment.userId, {
+          subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
+        });
+        await Notification.create({
+          userId: payment.userId,
+          type: 'system',
+          title: 'Payment confirmed ✅',
+          message: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}.`,
+          link: '/account',
+        });
+        sendPushToUsers({
+          userIds: [String(payment.userId)],
+          title: '✅ Subscription Activated!',
+          body: `Your ${payment.plan} plan is now active. Enjoy unlimited streaming!`,
+          type: 'system',
+          link: '/account',
+        }).catch(() => { });
+      }
+      return res.json({ status: 'completed', payment });
+    }
+
+    if (mtnStatus === 'FAILED') {
+      payment.status = 'failed';
+      payment.notes = `${payment.notes || ''} | FAILED: ${reason || 'unknown'}`;
+      await payment.save();
+      return res.json({ status: 'failed', reason, payment });
+    }
+
+    return res.json({ status: 'pending', mtnStatus, payment });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+});
+
+// ── POST MTN callback (webhook) ───────────────────────────────────────────────
+router.post('/mtn/callback', async (req, res) => {
+  try {
+    const { externalId, status, reason } = req.body;
+    if (!externalId) return res.status(400).json({ message: 'Missing externalId' });
+
+    // Find payment by MTN external ID stored in notes
+    const payment = await Payment.findOne({
+      notes: { $regex: externalId, $options: 'i' },
+      status: 'pending',
+    });
+
+    if (!payment) {
+      return res.status(200).json({ message: 'Payment not found or already processed' });
+    }
+
+    if (status === 'SUCCESSFUL') {
+      payment.status = 'completed';
+      await payment.save();
+
+      if (payment.expiresAt) {
+        await User.findByIdAndUpdate(payment.userId, {
+          subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
+        });
+        await Notification.create({
+          userId: payment.userId,
+          type: 'system',
+          title: 'Payment confirmed ✅',
+          message: `Your ${payment.plan} plan is now active.`,
+          link: '/account',
+        });
+        sendPushToUsers({
+          userIds: [String(payment.userId)],
+          title: '✅ Subscription Activated!',
+          body: `Your ${payment.plan} plan is now active. Enjoy unlimited streaming!`,
+          type: 'system',
+          link: '/account',
+        }).catch(() => { });
+      }
+    } else if (status === 'FAILED') {
+      payment.status = 'failed';
+      payment.notes = `${payment.notes || ''} | FAILED: ${reason || 'unknown'}`;
+      await payment.save();
+    }
+
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('MTN callback error:', err.message);
+    return res.status(500).json({ message: err.message });
+  }
+});
 
 router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
   try {
@@ -118,10 +264,10 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
       await User.findByIdAndUpdate(payment.userId, {
         $push: {
           purchasedContent: {
-            movieId:   payment.movieId,
+            movieId: payment.movieId,
             episodeId: payment.episodeId || null,
-            paidAt:    new Date(),
-            amount:    payment.amount,
+            paidAt: new Date(),
+            amount: payment.amount,
             reference: payment.reference,
           },
         },
@@ -140,7 +286,7 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
         body: 'Your pay-per-view purchase is confirmed. Tap to watch now.',
         type: 'system',
         link: `/movies/${payment.movieId}`,
-      }).catch(() => {});
+      }).catch(() => { });
     } else if (payment.expiresAt) {
       await User.findByIdAndUpdate(payment.userId, {
         subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
@@ -159,7 +305,7 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
         body: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}. Enjoy unlimited streaming!`,
         type: 'system',
         link: '/account',
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     return res.json({ message: 'Confirmed', payment });
@@ -200,24 +346,24 @@ router.get('/', protect, adminOnly, async (req, res) => {
     if (status) query.status = status;
     if (search) {
       query.$or = [
-        { userName:  { $regex: search, $options: 'i' } },
+        { userName: { $regex: search, $options: 'i' } },
         { userEmail: { $regex: search, $options: 'i' } },
         { reference: { $regex: search, $options: 'i' } },
-        { plan:      { $regex: search, $options: 'i' } },
+        { plan: { $regex: search, $options: 'i' } },
       ];
     }
     if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate)   query.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+      if (endDate) query.createdAt.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
     }
 
-    const total    = await Payment.countDocuments(query);
+    const total = await Payment.countDocuments(query);
     const payments = await Payment.find(query).sort({ createdAt: -1 }).skip((page - 1) * 20).limit(20);
 
     // Attach phone from User for each payment
     const userIds = [...new Set(payments.map(p => String(p.userId)))];
-    const users   = await User.find({ _id: { $in: userIds } }).select('_id phone');
+    const users = await User.find({ _id: { $in: userIds } }).select('_id phone');
     const phoneMap = {};
     users.forEach(u => { phoneMap[String(u._id)] = u.phone || null; });
 
@@ -232,7 +378,7 @@ router.get('/', protect, adminOnly, async (req, res) => {
     allPayments.forEach(p => {
       if (!planStats[p.plan]) planStats[p.plan] = { revenue: 0, count: 0 };
       planStats[p.plan].revenue += p.amount;
-      planStats[p.plan].count  += 1;
+      planStats[p.plan].count += 1;
     });
 
     return res.json({ payments: enriched, total, pages: Math.ceil(total / 20), planStats });
@@ -264,7 +410,7 @@ router.post('/ppv', protect, async (req, res) => {
     }
 
     const submittedPhone = normalizePhone(phone);
-    const paymentPhone   = user?.phone || submittedPhone;
+    const paymentPhone = user?.phone || submittedPhone;
     if (method !== 'card' && !paymentPhone) {
       return res.status(400).json({ message: 'Add a valid Rwanda mobile number to your account first.' });
     }
@@ -275,17 +421,17 @@ router.post('/ppv', protect, async (req, res) => {
 
     const reference = `CR-PPV-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
     const payment = await Payment.create({
-      userId:    req.user.id,
-      userName:  user.name,
+      userId: req.user.id,
+      userName: user.name,
       userEmail: publicContact(user),
-      plan:      'ppv',
-      amount:    PPV_PRICE,
+      plan: 'ppv',
+      amount: PPV_PRICE,
       method,
       reference,
       movieId,
       episodeId: episodeId || null,
-      status:    'pending',
-      notes:     `PPV: ${episodeId ? 'episode' : 'movie'} ${movieId}`,
+      status: 'pending',
+      notes: `PPV: ${episodeId ? 'episode' : 'movie'} ${movieId}`,
     });
 
     const ussd = buildUSSD(method, PPV_PRICE, reference, paymentPhone);
