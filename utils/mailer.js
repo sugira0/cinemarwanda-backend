@@ -146,20 +146,220 @@ function buildOtpTemplateParams({ to, name, code, purpose, deviceName, expiresIn
 function buildOtpEmailHtml({ name, code, purpose, deviceName, expiresInMinutes = 10 }) {
   const copy = buildOtpCopy({ purpose, code, deviceName, expiresInMinutes });
 
-  return `
-    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#0a0a0a;color:#fff;padding:2rem;border-radius:12px;">
-      <p style="color:#f59e0b;letter-spacing:0.18em;text-transform:uppercase;font-size:0.72rem;margin-bottom:0.8rem;">CINEMA Rwanda</p>
-      <h2 style="font-size:1.4rem;margin-bottom:0.5rem;">${copy.heading}</h2>
-      <p style="color:#b7c2ba;margin-bottom:1rem;">Hello ${name || 'there'},</p>
-      <p style="color:#d0d6d2;margin-bottom:1.25rem;line-height:1.6;">${copy.intro}</p>
-      <div style="display:inline-block;background:#1a1500;border:1px solid rgba(245,158,11,0.4);padding:14px 28px;font-size:2rem;letter-spacing:0.45rem;font-weight:700;color:#f59e0b;border-radius:8px;">
-        ${code}
-      </div>
-      <p style="color:#777;font-size:0.82rem;margin-top:1.25rem;line-height:1.6;">${copy.footer}</p>
-      <hr style="border:none;border-top:1px solid #1f1f1f;margin:1.5rem 0;" />
-      <p style="color:#444;font-size:0.75rem;">If you didn't request this, you can safely ignore this email.</p>
-    </div>
-  `;
+  const purposeIcon = purpose === 'register' ? '🎬' : purpose === 'password_reset' ? '🔐' : '📱';
+  const accentColor = '#f59e0b';
+  const bgDark = '#080600';
+  const bgCard = '#120f02';
+  const bgCode = '#1a1500';
+  const textMuted = '#8a8070';
+  const textBody = '#c8bfa8';
+  const border = 'rgba(245,158,11,0.25)';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${copy.subject}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0d0b01;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0d0b01;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+
+          <!-- Logo header -->
+          <tr>
+            <td align="center" style="padding-bottom:28px;">
+              <table cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding-right:10px;vertical-align:middle;">
+                    <div style="width:40px;height:40px;border-radius:50%;background:rgba(245,158,11,0.12);border:1.5px solid rgba(245,158,11,0.35);display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:40px;font-size:18px;">🎬</div>
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <span style="font-size:18px;font-weight:800;color:#fdf8ee;letter-spacing:1px;">CINEMA</span>
+                    <span style="font-size:13px;font-weight:300;color:rgba(253,248,238,0.35);letter-spacing:4px;margin-left:4px;">Rwanda</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background-color:${bgCard};border:1px solid ${border};border-radius:20px;overflow:hidden;">
+
+              <!-- Gold top bar -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="height:3px;background:linear-gradient(90deg,#d97706,#f59e0b,#fbbf24,#f59e0b,#d97706);"></td>
+                </tr>
+              </table>
+
+              <!-- Card body -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="padding:36px 40px;">
+                <tr>
+                  <td>
+                    <!-- Icon + heading -->
+                    <p style="margin:0 0 6px 0;font-size:28px;text-align:center;">${purposeIcon}</p>
+                    <h1 style="margin:0 0 8px 0;font-size:22px;font-weight:800;color:#fdf8ee;text-align:center;letter-spacing:-0.3px;">${copy.heading}</h1>
+                    <p style="margin:0 0 28px 0;font-size:13px;color:${textMuted};text-align:center;letter-spacing:0.5px;text-transform:uppercase;">One-Time Password</p>
+
+                    <!-- Greeting -->
+                    <p style="margin:0 0 12px 0;font-size:15px;color:${textBody};line-height:1.6;">Hello <strong style="color:#fdf8ee;">${name || 'there'}</strong>,</p>
+                    <p style="margin:0 0 28px 0;font-size:14px;color:${textBody};line-height:1.7;">${copy.intro}</p>
+
+                    <!-- OTP Code box -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                      <tr>
+                        <td align="center">
+                          <div style="display:inline-block;background:${bgCode};border:1.5px solid rgba(245,158,11,0.45);border-radius:12px;padding:18px 36px;">
+                            <p style="margin:0 0 6px 0;font-size:10px;font-weight:700;color:${textMuted};letter-spacing:2px;text-transform:uppercase;text-align:center;">Your code</p>
+                            <p style="margin:0;font-size:36px;font-weight:900;color:${accentColor};letter-spacing:10px;text-align:center;font-family:'Courier New',Courier,monospace;">${code}</p>
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- Expiry notice -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                      <tr>
+                        <td style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:8px;padding:12px 16px;">
+                          <p style="margin:0;font-size:13px;color:${textMuted};text-align:center;line-height:1.5;">⏱ ${copy.footer}</p>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- Divider -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+                      <tr>
+                        <td style="border-top:1px solid rgba(255,255,255,0.06);"></td>
+                      </tr>
+                    </table>
+
+                    <!-- Security note -->
+                    <p style="margin:0;font-size:12px;color:${textMuted};line-height:1.6;text-align:center;">
+                      🔒 If you didn't request this, you can safely ignore this email.<br/>
+                      Never share this code with anyone.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Gold bottom bar -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="height:2px;background:linear-gradient(90deg,transparent,rgba(245,158,11,0.4),transparent);"></td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding-top:28px;">
+              <p style="margin:0 0 6px 0;font-size:12px;color:rgba(253,248,238,0.2);">© 2025 CINEMA Rwanda · All rights reserved</p>
+              <p style="margin:0;font-size:11px;color:rgba(253,248,238,0.15);">The home of Rwandan cinema</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+function buildResetEmailHtml({ resetUrl }) {
+  const accentColor = '#f59e0b';
+  const bgCard = '#120f02';
+  const bgCode = '#1a1500';
+  const textMuted = '#8a8070';
+  const textBody = '#c8bfa8';
+  const border = 'rgba(245,158,11,0.25)';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reset your CINEMA Rwanda password</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0d0b01;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0d0b01;padding:40px 16px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+
+          <!-- Logo -->
+          <tr>
+            <td align="center" style="padding-bottom:28px;">
+              <span style="font-size:18px;font-weight:800;color:#fdf8ee;letter-spacing:1px;">CINEMA</span>
+              <span style="font-size:13px;font-weight:300;color:rgba(253,248,238,0.35);letter-spacing:4px;margin-left:4px;">Rwanda</span>
+            </td>
+          </tr>
+
+          <!-- Card -->
+          <tr>
+            <td style="background-color:${bgCard};border:1px solid ${border};border-radius:20px;overflow:hidden;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr><td style="height:3px;background:linear-gradient(90deg,#d97706,#f59e0b,#fbbf24,#f59e0b,#d97706);"></td></tr>
+              </table>
+              <table width="100%" cellpadding="0" cellspacing="0" style="padding:36px 40px;">
+                <tr>
+                  <td>
+                    <p style="margin:0 0 6px 0;font-size:28px;text-align:center;">🔐</p>
+                    <h1 style="margin:0 0 24px 0;font-size:22px;font-weight:800;color:#fdf8ee;text-align:center;">Reset your password</h1>
+                    <p style="margin:0 0 24px 0;font-size:14px;color:${textBody};line-height:1.7;text-align:center;">Click the button below to reset your CINEMA Rwanda password. This link expires in <strong style="color:#fdf8ee;">1 hour</strong>.</p>
+
+                    <!-- CTA Button -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+                      <tr>
+                        <td align="center">
+                          <a href="${resetUrl}" style="display:inline-block;background:${accentColor};color:#000;padding:14px 36px;border-radius:10px;font-weight:800;text-decoration:none;font-size:15px;letter-spacing:0.3px;">Reset Password</a>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <!-- Fallback URL -->
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                      <tr>
+                        <td style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:8px;padding:12px 16px;">
+                          <p style="margin:0 0 4px 0;font-size:11px;color:${textMuted};text-transform:uppercase;letter-spacing:1px;">Or copy this link</p>
+                          <p style="margin:0;font-size:11px;color:${accentColor};word-break:break-all;">${resetUrl}</p>
+                        </td>
+                      </tr>
+                    </table>
+
+                    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+                      <tr><td style="border-top:1px solid rgba(255,255,255,0.06);"></td></tr>
+                    </table>
+                    <p style="margin:0;font-size:12px;color:${textMuted};line-height:1.6;text-align:center;">🔒 If you didn't request this, ignore this email. Your password won't change.</p>
+                  </td>
+                </tr>
+              </table>
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr><td style="height:2px;background:linear-gradient(90deg,transparent,rgba(245,158,11,0.4),transparent);"></td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding-top:28px;">
+              <p style="margin:0 0 6px 0;font-size:12px;color:rgba(253,248,238,0.2);">© 2025 CINEMA Rwanda · All rights reserved</p>
+              <p style="margin:0;font-size:11px;color:rgba(253,248,238,0.15);">The home of Rwandan cinema</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 async function sendViaEmailJs(templateParams) {
@@ -252,19 +452,7 @@ async function sendResetEmail(to, resetUrl) {
   await sendViaSmtp({
     to,
     subject: 'Reset your CINEMA Rwanda password',
-    html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#0a0a0a;color:#fff;padding:2rem;border-radius:12px;">
-        <p style="color:#f59e0b;letter-spacing:0.18em;text-transform:uppercase;font-size:0.72rem;margin-bottom:0.8rem;">CINEMA Rwanda</p>
-        <h2 style="font-size:1.4rem;margin-bottom:0.5rem;">Reset your password</h2>
-        <p style="color:#888;margin-bottom:1.5rem;">Click the button below to reset your password. This link expires in <strong>1 hour</strong>.</p>
-        <a href="${resetUrl}"
-          style="display:inline-block;background:#f59e0b;color:#000;padding:12px 28px;border-radius:8px;font-weight:700;text-decoration:none;font-size:0.95rem;">
-          Reset Password
-        </a>
-        <p style="color:#555;font-size:0.8rem;margin-top:1.5rem;">If you didn't request this, ignore this email. Your password won't change.</p>
-        <p style="color:#555;font-size:0.75rem;">Or copy this link: ${resetUrl}</p>
-      </div>
-    `,
+    html: buildResetEmailHtml({ resetUrl }),
     text: `Reset your CINEMA Rwanda password using this link: ${resetUrl}`,
   });
 }
