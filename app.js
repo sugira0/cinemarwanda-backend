@@ -131,6 +131,7 @@ app.use('/api/settings', cacheMiddleware(CACHE_TTL.long), require('./routes/sett
 app.use('/api/plans', cacheMiddleware(CACHE_TTL.long), require('./routes/plans'));
 app.use('/api/presence', require('./routes/presence'));
 app.use('/api/bulk', maintenanceGuard, require('./routes/bulk'));
+app.use('/api/progress', maintenanceGuard, require('./routes/progress'));
 
 app.get('/', (req, res) => res.json({ status: 'CINEMA Rwanda API running', version: '1.0' }));
 
