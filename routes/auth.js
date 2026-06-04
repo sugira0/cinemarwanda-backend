@@ -35,6 +35,7 @@ const {
   sanitizeEmail,
 } = require('../utils/authContact');
 const { buildDeviceSnapshot } = require('../utils/deviceContext');
+const { verifyFirebaseIdToken } = require('../utils/firebaseAdmin');
 
 const SECRET = process.env.JWT_SECRET;
 const MAX_DEVICES = 2;
@@ -1402,14 +1403,16 @@ router.post('/google', async (req, res) => {
     }
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
-    if (!clientId) {
+    if (!clientId && !process.env.FIREBASE_PROJECT_ID) {
       return res.status(500).json({ message: 'Google OAuth is not configured on the server.' });
     }
 
     let googleId, email, name, picture;
+    let credentialProvider = 'google';
 
     // Path 1: ID token (web) — verify with Google
-    // Path 2: Access token (mobile Expo) — use provided userInfo
+    // Path 2: Firebase ID token — verify with Firebase Admin
+    // Path 3: Access token (mobile Expo) — use provided userInfo
     if (googleUserInfo) {
       // Mobile path: access token + userInfo from Google's userinfo endpoint
       googleId = googleUserInfo.sub;
@@ -1421,19 +1424,35 @@ router.post('/google', async (req, res) => {
         return res.status(400).json({ message: 'Invalid Google user info.' });
       }
     } else {
-      // Web path: verify ID token
-      const client = new OAuth2Client(clientId);
-      let ticket;
-      try {
-        ticket = await client.verifyIdToken({ idToken: credential, audience: clientId });
-      } catch {
-        return res.status(401).json({ message: 'Invalid Google token. Please try again.' });
+      let payload;
+      if (clientId) {
+        const client = new OAuth2Client(clientId);
+        try {
+          const ticket = await client.verifyIdToken({ idToken: credential, audience: clientId });
+          payload = ticket.getPayload();
+        } catch (err) {
+          if (process.env.FIREBASE_PROJECT_ID) {
+            const decoded = await verifyFirebaseIdToken(credential);
+            payload = decoded;
+            credentialProvider = 'firebase';
+          } else {
+            return res.status(401).json({ message: 'Invalid Google token. Please try again.' });
+          }
+        }
+      } else {
+        const decoded = await verifyFirebaseIdToken(credential);
+        payload = decoded;
+        credentialProvider = 'firebase';
       }
-      const payload = ticket.getPayload();
-      googleId = payload.sub;
+
+      googleId = payload.sub || payload.uid || payload?.firebase?.identities?.['google.com']?.[0];
       email = payload.email;
-      name = payload.name;
-      picture = payload.picture;
+      name = payload.name || payload.displayName;
+      picture = payload.picture || payload.photoURL;
+
+      if (!googleId && !email) {
+        return res.status(400).json({ message: 'Unable to verify Google user information.' });
+      }
     }
 
     if (!email) {
@@ -1441,24 +1460,25 @@ router.post('/google', async (req, res) => {
     }
 
     const normalizedEmail = normalizeEmail(email);
+    const uidField = googleId ? `${credentialProvider}:${googleId}` : null;
 
     // Find or create user
-    let user = await User.findOne({
-      $or: [{ firebaseUid: `google:${googleId}` }, { email: normalizedEmail }],
-    });
+    const query = uidField
+      ? { $or: [{ firebaseUid: uidField }, { email: normalizedEmail }] }
+      : { email: normalizedEmail };
+
+    let user = await User.findOne(query);
 
     if (!user) {
       user = await User.create({
-        firebaseUid: `google:${googleId}`,
+        firebaseUid: uidField,
         name: name || normalizedEmail.split('@')[0],
         email: normalizedEmail,
         role: 'viewer',
       });
-    } else {
-      if (!user.firebaseUid) {
-        user.firebaseUid = `google:${googleId}`;
-        await user.save();
-      }
+    } else if (uidField && !user.firebaseUid) {
+      user.firebaseUid = uidField;
+      await user.save();
     }
 
     if (user.status === 'suspended') {
