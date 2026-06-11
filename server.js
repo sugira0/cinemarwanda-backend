@@ -15,5 +15,23 @@ connectToDatabase()
   })
   .catch((err) => {
     console.error('MongoDB connection error:', err.message);
-    process.exit(1);
+    console.warn('Starting server without MongoDB connection. Will retry in background.');
+
+    // Start server anyway
+    app.listen(process.env.PORT || 5000, () =>
+      console.log(`Server running on port ${process.env.PORT || 5000} (MongoDB connection pending)`)
+    );
+
+    // Retry MongoDB connection in background
+    const retryInterval = setInterval(() => {
+      connectToDatabase()
+        .then(async () => {
+          console.log('MongoDB connected (retry successful)');
+          await seed();
+          clearInterval(retryInterval);
+        })
+        .catch(() => {
+          // Silent retry - already logged initial error
+        });
+    }, 30000); // Retry every 30 seconds
   });

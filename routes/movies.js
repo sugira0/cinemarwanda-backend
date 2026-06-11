@@ -243,42 +243,33 @@ router.get('/:id/stream', protect, requireSubscription, async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const user = await optionalAuth(req);
-    const movie = await Movie.findById(req.params.id);
+    // Run auth resolution and DB fetch in parallel
+    const [user, movie] = await Promise.all([
+      optionalAuth(req),
+      Movie.findById(req.params.id).lean(),
+    ]);
 
     if (!movie) {
       return res.status(404).json({ message: 'Movie not found' });
     }
 
+    res.set('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
     return res.json(serializeMovie(movie, user));
   } catch (err) {
     return res.status(500).json({ message: err.message });
   }
 });
 
-router.post('/:id/view', async (req, res) => {
-  try {
-    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
-    const movie = await Movie.findByIdAndUpdate(
-      req.params.id,
-      {
-        $inc: { views: 1 },
-        ...(ip ? { $addToSet: { viewedIPs: ip } } : {}),
-      },
-      {
-        new: true,
-        select: 'views',
-      },
-    );
+router.post('/:id/view', (req, res) => {
+  // Respond immediately — don't make the user wait for a DB write
+  res.json({ ok: true });
 
-    if (!movie) {
-      return res.status(404).json({ message: 'Movie not found' });
-    }
-
-    return res.json({ views: movie.views });
-  } catch (err) {
-    return res.status(500).json({ message: err.message });
-  }
+  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+  Movie.findByIdAndUpdate(
+    req.params.id,
+    { $inc: { views: 1 }, ...(ip ? { $addToSet: { viewedIPs: ip } } : {}) },
+    { select: '_id' },
+  ).exec().catch(() => {}); // fire-and-forget
 });
 
 router.post(

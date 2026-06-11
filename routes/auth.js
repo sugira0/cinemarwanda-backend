@@ -36,6 +36,13 @@ const {
 } = require('../utils/authContact');
 const { buildDeviceSnapshot } = require('../utils/deviceContext');
 const { verifyFirebaseIdToken } = require('../utils/firebaseAdmin');
+const { OAuth2Client } = require('google-auth-library');
+const _googleOAuthClient = new OAuth2Client();
+
+async function verifyGoogleAccessToken(accessToken) {
+  const info = await _googleOAuthClient.getTokenInfo(accessToken);
+  return info; // { email, sub, ... }
+}
 
 const SECRET = process.env.JWT_SECRET;
 const MAX_DEVICES = 2;
@@ -1392,29 +1399,110 @@ router.patch('/change-password', protect, async (req, res) => {
   }
 });
 
-// ── Google OAuth ──────────────────────────────────────────────────────────────
+// ── Google OAuth (server-side popup flow) ─────────────────────────────────────
+const _getBackendOrigin = () => process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+const _googleCallbackUri = () => `${_getBackendOrigin()}/api/auth/google/callback`;
+
+router.get('/google/authorize', (req, res) => {
+  const { deviceId, deviceName, origin } = req.query;
+  const state = Buffer.from(JSON.stringify({
+    deviceId: deviceId || `web_${Date.now()}`,
+    deviceName: deviceName || 'Web Browser',
+    origin: origin || 'http://localhost:5173',
+  })).toString('base64');
+
+  const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, _googleCallbackUri());
+  const url = client.generateAuthUrl({ access_type: 'online', scope: ['openid', 'email', 'profile'], state });
+  res.redirect(url);
+});
+
+router.get('/google/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+
+  let st = { origin: 'http://localhost:5173', deviceId: `web_${Date.now()}`, deviceName: 'Web Browser' };
+  try { st = { ...st, ...JSON.parse(Buffer.from(state || '', 'base64').toString()) }; } catch {}
+
+  const reply = (payload) => res.send(
+    `<!DOCTYPE html><html><body><script>` +
+    `(function(){var d=${JSON.stringify(payload)};` +
+    `if(window.opener){window.opener.postMessage(d,${JSON.stringify(st.origin)});window.close();}` +
+    `else{document.body.innerText=d.error||'Done. Close this window.';}})();` +
+    `</script></body></html>`
+  );
+
+  if (error) return reply({ error });
+  if (!code) return reply({ error: 'No authorization code received.' });
+
+  try {
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, _googleCallbackUri());
+    const { tokens } = await client.getToken(code);
+    const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: process.env.GOOGLE_CLIENT_ID });
+    const payload = ticket.getPayload();
+
+    if (!payload.email) return reply({ error: 'Google account must have an email address.' });
+
+    const normalizedEmail = normalizeEmail(payload.email);
+    const uidField = `google:${payload.sub}`;
+
+    let user = await User.findOne({ $or: [{ firebaseUid: uidField }, { email: normalizedEmail }] });
+    if (!user) {
+      user = await User.create({
+        firebaseUid: uidField,
+        name: payload.name || normalizedEmail.split('@')[0],
+        email: normalizedEmail,
+        role: 'viewer',
+      });
+    } else if (!user.firebaseUid) {
+      user.firebaseUid = uidField;
+      await user.save();
+    }
+
+    if (user.status === 'suspended') return reply({ error: 'Your account has been suspended. Contact support.' });
+
+    req.body = { deviceId: st.deviceId, deviceName: st.deviceName };
+    const deviceResult = await attachDevice(user, req, st.deviceId);
+    if (deviceResult.limited) {
+      return reply({ error: `Account registered on max devices. Remove a device to continue.`, devices: deviceResult.devices });
+    }
+
+    const actorId = await findActorId(user);
+    const token = signToken(user, deviceResult.deviceId);
+    reply({ token, deviceId: deviceResult.deviceId, user: safeUser(user, { actorId, avatar: payload.picture }) });
+  } catch (err) {
+    reply({ error: err.message || 'Google sign-in failed.' });
+  }
+});
+
+// ── Google OAuth (credential/token path for mobile) ───────────────────────────
 router.post('/google', async (req, res) => {
   try {
-    const { OAuth2Client } = require('google-auth-library');
     const { credential, googleUserInfo, deviceId, deviceName } = req.body;
 
     if (!credential) {
       return res.status(400).json({ message: 'Google credential is required.' });
     }
 
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    if (!clientId && !process.env.FIREBASE_PROJECT_ID) {
-      return res.status(500).json({ message: 'Google OAuth is not configured on the server.' });
+    if (!process.env.FIREBASE_PROJECT_ID) {
+      return res.status(500).json({ message: 'Firebase OAuth is not configured on the server.' });
     }
 
     let googleId, email, name, picture;
-    let credentialProvider = 'google';
+    let credentialProvider = 'firebase';
 
-    // Path 1: ID token (web) — verify with Google
-    // Path 2: Firebase ID token — verify with Firebase Admin
-    // Path 3: Access token (mobile Expo) — use provided userInfo
+    // Path 1: Firebase ID token — verify with Firebase Admin
+    // Path 2: Access token (mobile Expo) — use provided userInfo
     if (googleUserInfo) {
-      // Mobile path: access token + userInfo from Google's userinfo endpoint
+      // Web/mobile path: access token + userInfo from Google's userinfo endpoint
+      // Verify the access token to ensure it is genuine
+      try {
+        const tokenInfo = await verifyGoogleAccessToken(credential);
+        if (tokenInfo.email && tokenInfo.email !== googleUserInfo.email) {
+          return res.status(401).json({ message: 'Google token email mismatch.' });
+        }
+      } catch {
+        return res.status(401).json({ message: 'Invalid Google access token.' });
+      }
+
       googleId = googleUserInfo.sub;
       email = googleUserInfo.email;
       name = googleUserInfo.name;
@@ -1424,26 +1512,8 @@ router.post('/google', async (req, res) => {
         return res.status(400).json({ message: 'Invalid Google user info.' });
       }
     } else {
-      let payload;
-      if (clientId) {
-        const client = new OAuth2Client(clientId);
-        try {
-          const ticket = await client.verifyIdToken({ idToken: credential, audience: clientId });
-          payload = ticket.getPayload();
-        } catch (err) {
-          if (process.env.FIREBASE_PROJECT_ID) {
-            const decoded = await verifyFirebaseIdToken(credential);
-            payload = decoded;
-            credentialProvider = 'firebase';
-          } else {
-            return res.status(401).json({ message: 'Invalid Google token. Please try again.' });
-          }
-        }
-      } else {
-        const decoded = await verifyFirebaseIdToken(credential);
-        payload = decoded;
-        credentialProvider = 'firebase';
-      }
+      // Verify Firebase ID token
+      const payload = await verifyFirebaseIdToken(credential);
 
       googleId = payload.sub || payload.uid || payload?.firebase?.identities?.['google.com']?.[0];
       email = payload.email;
@@ -1451,7 +1521,7 @@ router.post('/google', async (req, res) => {
       picture = payload.picture || payload.photoURL;
 
       if (!googleId && !email) {
-        return res.status(400).json({ message: 'Unable to verify Google user information.' });
+        return res.status(400).json({ message: 'Unable to verify Firebase user information.' });
       }
     }
 
