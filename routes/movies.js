@@ -166,7 +166,7 @@ router.get('/', async (req, res) => {
     const movies = await Movie.find(query)
       .sort({ createdAt: -1 })
       .limit(120)
-      .select('title description genre year duration language poster trailerUrl type featured views episodes.title episodes.season episodes.episode episodes.duration episodes.videoUrl episodes.videoLink createdAt updatedAt')
+      .select('title description genre year duration language country poster trailerUrl type featured views episodes.title episodes.season episodes.episode episodes.duration episodes.videoUrl episodes.videoLink createdAt updatedAt')
       .lean();
 
     res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
@@ -178,7 +178,7 @@ router.get('/', async (req, res) => {
 
 router.get('/home', async (req, res) => {
   try {
-    const summaryFields = 'title description genre year duration language poster trailerUrl type featured views episodes.title episodes.season episodes.episode episodes.duration episodes.videoUrl episodes.videoLink createdAt updatedAt';
+    const summaryFields = 'title description genre year duration language country poster trailerUrl type featured views episodes.title episodes.season episodes.episode episodes.duration episodes.videoUrl episodes.videoLink createdAt updatedAt';
     const [featured, latest, recommended] = await Promise.all([
       Movie.find({ featured: true }).limit(5).select(summaryFields).lean(),
       Movie.find({}).sort({ createdAt: -1 }).limit(20).select(summaryFields).lean(),
@@ -269,7 +269,7 @@ router.post('/:id/view', (req, res) => {
     req.params.id,
     { $inc: { views: 1 }, ...(ip ? { $addToSet: { viewedIPs: ip } } : {}) },
     { select: '_id' },
-  ).exec().catch(() => {}); // fire-and-forget
+  ).exec().catch(() => { }); // fire-and-forget
 });
 
 router.post(
@@ -281,7 +281,7 @@ router.post(
     const uploadedAssets = [];
 
     try {
-      const { title, description, genre, year, duration, language, featured, type, videoLink, cast } = req.body;
+      const { title, description, genre, year, duration, language, country, featured, type, videoLink, cast } = req.body;
       const posterAsset = req.files?.poster?.[0]
         ? await uploadAsset(req.files.poster[0], { folder: 'posters', resourceType: 'image' })
         : null;
@@ -298,7 +298,7 @@ router.post(
         year: Number(year) || undefined,
         duration,
         language,
-        type: type || 'movie',
+        country: country || 'Rwanda',
         featured: req.user.role === 'admin' && featured === 'true',
         poster: posterAsset?.ref || null,
         videoUrl: videoAsset?.ref || null,
@@ -317,7 +317,7 @@ router.post(
         type: 'new_movie',
         link: `/movies/${movie._id}`,
         data: { movieId: String(movie._id) },
-      }).catch(() => {}); // fire-and-forget
+      }).catch(() => { }); // fire-and-forget
 
       return res.status(201).json(movie);
     } catch (err) {
@@ -346,7 +346,7 @@ router.put(
         return res.status(403).json({ message: 'Not your movie' });
       }
 
-      const { title, description, genre, year, duration, language, featured, type, videoLink } = req.body;
+      const { title, description, genre, year, duration, language, country, featured, type, videoLink } = req.body;
 
       if (title) movie.title = title;
       if (description) movie.description = description;
@@ -354,6 +354,7 @@ router.put(
       if (year) movie.year = Number(year);
       if (duration) movie.duration = duration;
       if (language) movie.language = language;
+      if (country) movie.country = country;
       if (type) movie.type = type;
       if (videoLink !== undefined) movie.videoLink = videoLink || null;
       if (req.body.trailerUrl !== undefined) movie.trailerUrl = req.body.trailerUrl || null;
