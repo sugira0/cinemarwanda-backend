@@ -64,7 +64,7 @@ function getTransportConfig() {
 }
 
 function getFromAddress() {
-  return process.env.EMAIL_FROM || `"CINEMA Rwanda" <${process.env.EMAIL_USER}>`;
+  return process.env.EMAIL_FROM || `"Lumina Cinema" <${process.env.EMAIL_USER}>`;
 }
 
 let cachedTransporter = null;
@@ -80,33 +80,33 @@ function getTransporter() {
 function buildOtpCopy({ purpose, code, deviceName, expiresInMinutes = 10 }) {
   if (purpose === 'register') {
     return {
-      subject: 'Verify your CINEMA Rwanda account',
+      subject: 'Verify your Lumina Cinema account',
       heading: 'Confirm your email address',
-      intro: 'Use this one-time password to finish creating your CINEMA Rwanda account.',
+      intro: 'Use this one-time password to finish creating your Lumina Cinema account.',
       footer: `This code expires in ${expiresInMinutes} minutes.`,
       actionLabel: 'Sign up',
-      plainText: `Your CINEMA Rwanda sign-up code is ${code}. It expires in ${expiresInMinutes} minutes.`,
+      plainText: `Your Lumina Cinema sign-up code is ${code}. It expires in ${expiresInMinutes} minutes.`,
     };
   }
 
   if (purpose === 'password_reset') {
     return {
-      subject: 'Your CINEMA Rwanda password reset code',
+      subject: 'Your Lumina Cinema password reset code',
       heading: 'Reset your password',
-      intro: 'Enter this one-time password to reset your CINEMA Rwanda password.',
+      intro: 'Enter this one-time password to reset your Lumina Cinema password.',
       footer: `This code expires in ${expiresInMinutes} minutes. If you did not request it, you can ignore this email.`,
       actionLabel: 'Reset password',
-      plainText: `Your CINEMA Rwanda password reset code is ${code}. It expires in ${expiresInMinutes} minutes.`,
+      plainText: `Your Lumina Cinema password reset code is ${code}. It expires in ${expiresInMinutes} minutes.`,
     };
   }
 
   return {
-    subject: 'Verify device removal for CINEMA Rwanda',
+    subject: 'Verify device removal for Lumina Cinema',
     heading: 'Confirm device removal',
-    intro: `Use this one-time password to remove ${deviceName ? `"${deviceName}"` : 'the selected device'} from your CINEMA Rwanda account.`,
+    intro: `Use this one-time password to remove ${deviceName ? `"${deviceName}"` : 'the selected device'} from your Lumina Cinema account.`,
     footer: `This code expires in ${expiresInMinutes} minutes.`,
     actionLabel: 'Remove device',
-    plainText: `Your CINEMA Rwanda device removal code is ${code}. It expires in ${expiresInMinutes} minutes.`,
+    plainText: `Your Lumina Cinema device removal code is ${code}. It expires in ${expiresInMinutes} minutes.`,
   };
 }
 
@@ -117,9 +117,9 @@ function buildOtpTemplateParams({ to, name, code, purpose, deviceName, expiresIn
     to_email: to,
     email: to,
     recipient_email: to,
-    to_name: name || 'CINEMA Rwanda user',
-    name: name || 'CINEMA Rwanda user',
-    user_name: name || 'CINEMA Rwanda user',
+    to_name: name || 'Lumina Cinema user',
+    name: name || 'Lumina Cinema user',
+    user_name: name || 'Lumina Cinema user',
     otp_code: code,
     otp: code,
     passcode: code,
@@ -138,7 +138,7 @@ function buildOtpTemplateParams({ to, name, code, purpose, deviceName, expiresIn
     expires_in_minutes: expiresInMinutes,
     expiresInMinutes,
     device_name: deviceName || '',
-    app_name: 'CINEMA Rwanda',
+    app_name: 'Lumina Cinema',
     support_email: process.env.EMAIL_USER || 'support@cinemarwanda.local',
   };
 }
@@ -259,7 +259,7 @@ function buildOtpEmailHtml({ name, code, purpose, deviceName, expiresInMinutes =
           <!-- Footer -->
           <tr>
             <td align="center" style="padding-top:28px;">
-              <p style="margin:0 0 6px 0;font-size:12px;color:rgba(253,248,238,0.2);">© 2025 CINEMA Rwanda · All rights reserved</p>
+              <p style="margin:0 0 6px 0;font-size:12px;color:rgba(253,248,238,0.2);">© 2025 Lumina Cinema · All rights reserved</p>
               <p style="margin:0;font-size:11px;color:rgba(253,248,238,0.15);">The home of Rwandan cinema</p>
             </td>
           </tr>
@@ -285,7 +285,7 @@ function buildResetEmailHtml({ resetUrl }) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Reset your CINEMA Rwanda password</title>
+  <title>Reset your Lumina Cinema password</title>
 </head>
 <body style="margin:0;padding:0;background-color:#0d0b01;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0d0b01;padding:40px 16px;">
@@ -312,7 +312,7 @@ function buildResetEmailHtml({ resetUrl }) {
                   <td>
                     <p style="margin:0 0 6px 0;font-size:28px;text-align:center;">🔐</p>
                     <h1 style="margin:0 0 24px 0;font-size:22px;font-weight:800;color:#fdf8ee;text-align:center;">Reset your password</h1>
-                    <p style="margin:0 0 24px 0;font-size:14px;color:${textBody};line-height:1.7;text-align:center;">Click the button below to reset your CINEMA Rwanda password. This link expires in <strong style="color:#fdf8ee;">1 hour</strong>.</p>
+                    <p style="margin:0 0 24px 0;font-size:14px;color:${textBody};line-height:1.7;text-align:center;">Click the button below to reset your Lumina Cinema password. This link expires in <strong style="color:#fdf8ee;">1 hour</strong>.</p>
 
                     <!-- CTA Button -->
                     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
@@ -349,7 +349,7 @@ function buildResetEmailHtml({ resetUrl }) {
           <!-- Footer -->
           <tr>
             <td align="center" style="padding-top:28px;">
-              <p style="margin:0 0 6px 0;font-size:12px;color:rgba(253,248,238,0.2);">© 2025 CINEMA Rwanda · All rights reserved</p>
+              <p style="margin:0 0 6px 0;font-size:12px;color:rgba(253,248,238,0.2);">© 2025 Lumina Cinema · All rights reserved</p>
               <p style="margin:0;font-size:11px;color:rgba(253,248,238,0.15);">The home of Rwandan cinema</p>
             </td>
           </tr>
@@ -451,9 +451,9 @@ async function sendResetEmail(to, resetUrl) {
 
   await sendViaSmtp({
     to,
-    subject: 'Reset your CINEMA Rwanda password',
+    subject: 'Reset your Lumina Cinema password',
     html: buildResetEmailHtml({ resetUrl }),
-    text: `Reset your CINEMA Rwanda password using this link: ${resetUrl}`,
+    text: `Reset your Lumina Cinema password using this link: ${resetUrl}`,
   });
 }
 

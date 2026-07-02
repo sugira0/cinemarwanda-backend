@@ -313,7 +313,7 @@ router.post(
         title: `🎬 New ${movie.type === 'series' ? 'Series' : 'Film'}: ${movie.title}`,
         body: movie.description
           ? movie.description.slice(0, 100) + (movie.description.length > 100 ? '...' : '')
-          : 'A new title just dropped on CINEMA Rwanda. Watch it now!',
+          : 'A new title just dropped on Lumina Cinema. Watch it now!',
         type: 'new_movie',
         link: `/movies/${movie._id}`,
         data: { movieId: String(movie._id) },

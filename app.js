@@ -16,9 +16,9 @@ app.set('trust proxy', true);
 // ── In-memory cache for hot read endpoints ────────────────────────────────────
 const _cache = new Map();
 const CACHE_TTL = {
-  short:  30 * 1000,
-  medium:  3 * 60 * 1000,
-  long:   10 * 60 * 1000,
+  short: 30 * 1000,
+  medium: 3 * 60 * 1000,
+  long: 10 * 60 * 1000,
 };
 
 // Private cache: skips authenticated requests (user-specific data like watchlist)
@@ -179,8 +179,9 @@ app.use('/api/plans', publicCacheMiddleware(CACHE_TTL.long), require('./routes/p
 app.use('/api/presence', require('./routes/presence'));
 app.use('/api/bulk', maintenanceGuard, require('./routes/bulk'));
 app.use('/api/progress', maintenanceGuard, require('./routes/progress'));
+app.use('/api/songs', maintenanceGuard, publicCacheMiddleware(CACHE_TTL.medium), require('./routes/songs'));
 
-app.get('/', (req, res) => res.json({ status: 'CINEMA Rwanda API running', version: '1.0' }));
+app.get('/', (req, res) => res.json({ status: 'Lumina Cinema API running', version: '1.0' }));
 
 // ── Global error handler ──────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

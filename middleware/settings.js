@@ -51,7 +51,7 @@ const maintenanceGuard = async (req, res, next) => {
     if (req.path === '/api/settings/public' || req.path === '/') return next();
 
     return res.status(503).json({
-      message: 'CINEMA Rwanda is currently under maintenance. Please check back soon.',
+      message: 'Lumina Cinema is currently under maintenance. Please check back soon.',
       code: 'MAINTENANCE_MODE',
     });
   } catch {

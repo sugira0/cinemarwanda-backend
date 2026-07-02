@@ -1,6 +1,6 @@
-# CINEMA Rwanda Backend API
+# Lumina Cinema Backend API
 
-Core backend API server for the CINEMA Rwanda streaming platform. This is the active production backend serving all client applications (web, mobile, admin portal).
+Core backend API server for the Lumina Cinema streaming platform. This is the active production backend serving all client applications (web, mobile, admin portal).
 
 ## Overview
 

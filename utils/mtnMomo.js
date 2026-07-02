@@ -91,7 +91,7 @@ async function requestToPay({ phone, amount, reference, description }) {
             partyIdType: 'MSISDN',
             partyId: msisdn,
         },
-        payerMessage: description || `CINEMA Rwanda - ${reference}`,
+        payerMessage: description || `Lumina Cinema - ${reference}`,
         payeeNote: reference,
     };
 

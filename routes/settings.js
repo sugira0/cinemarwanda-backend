@@ -8,7 +8,7 @@ const { invalidateSettingsCache } = require('../middleware/settings');
 // Default values — used when no settings doc exists yet
 const DEFAULTS = {
   platform: {
-    siteName: 'CINEMA Rwanda',
+    siteName: 'Lumina Cinema',
     freeEpisodes: 2,
     maintenanceMode: false,
     allowRegistrations: true,
@@ -31,10 +31,10 @@ const DEFAULTS = {
     systemUpdates: true,
   },
   content: {
-    terms: 'By using CINEMA Rwanda, you agree to our terms of service. You may not reproduce, distribute, or create derivative works from our content without explicit permission.\n\nSubscriptions are billed monthly and can be cancelled at any time. Refunds are issued at our discretion.\n\nWe reserve the right to suspend accounts that violate our community guidelines.\n\nFor questions, contact rwandancinema@gmail.com',
+    terms: 'By using Lumina Cinema, you agree to our terms of service. You may not reproduce, distribute, or create derivative works from our content without explicit permission.\n\nSubscriptions are billed monthly and can be cancelled at any time. Refunds are issued at our discretion.\n\nWe reserve the right to suspend accounts that violate our community guidelines.\n\nFor questions, contact rwandancinema@gmail.com',
     help: 'Frequently Asked Questions\n\n• How do I subscribe?\nGo to the Plans tab and choose a plan. Pay via MTN MoMo or Airtel Money.\n\n• Why can\'t I watch a film?\nYou need an active subscription. Episodes 1 & 2 of any series are free.\n\n• How do I cancel?\nSubscriptions expire automatically. Simply don\'t renew.\n\n• I paid but my plan isn\'t active?\nPayments are confirmed manually within 24 hours. Contact support if it takes longer.\n\n• How do I change my password?\nGo to Profile → Security → Change Password.',
-    ownership: 'Your CINEMA Rwanda account is personal and non-transferable.\n\nYou are responsible for all activity on your account. Do not share your login credentials.\n\nIf you believe your account has been compromised, change your password immediately and contact support.\n\nAccounts are limited to 2 registered devices at a time.',
-    invite: 'Join me on CINEMA Rwanda! Watch the best Rwandan movies & series.\n\nhttps://cinemarwanda.com',
+    ownership: 'Your Lumina Cinema account is personal and non-transferable.\n\nYou are responsible for all activity on your account. Do not share your login credentials.\n\nIf you believe your account has been compromised, change your password immediately and contact support.\n\nAccounts are limited to 2 registered devices at a time.',
+    invite: 'Join me on Lumina Cinema! Watch the best Rwandan movies & series.\n\nhttps://cinemarwanda.com',
   },
   languages: [
     { code: 'en', label: 'English (US)', native: 'English', active: true },
@@ -240,7 +240,7 @@ router.get('/app-version', async (req, res) => {
       latestVersion: '1.0.0',
       minVersion: '1.0.0',
       downloadUrl: 'https://expo.dev/accounts/cinemarwanda/projects/cinemarwanda/builds',
-      message: 'A new version of CINEMA Rwanda is available. Please update for the best experience.',
+      message: 'A new version of Lumina Cinema is available. Please update for the best experience.',
       forceUpdate: false,
     });
     res.json(version);
@@ -256,7 +256,7 @@ router.patch('/app-version', protect, adminOnly, async (req, res) => {
       latestVersion: '1.0.0',
       minVersion: '1.0.0',
       downloadUrl: 'https://expo.dev/accounts/cinemarwanda/projects/cinemarwanda/builds',
-      message: 'A new version of CINEMA Rwanda is available. Please update for the best experience.',
+      message: 'A new version of Lumina Cinema is available. Please update for the best experience.',
       forceUpdate: false,
     });
     const updated = {

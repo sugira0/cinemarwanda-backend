@@ -8,7 +8,7 @@ function isGenericWhatsAppConfigured() {
 
 function buildVerificationMessage(code, deviceName) {
   return [
-    'CINEMA Rwanda device removal verification',
+    'Lumina Cinema device removal verification',
     `Code: ${code}`,
     deviceName ? `Device: ${deviceName}` : null,
     'This code expires in 10 minutes.',

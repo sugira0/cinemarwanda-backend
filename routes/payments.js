@@ -85,7 +85,7 @@ router.post('/initiate', protect, async (req, res) => {
           phone: paymentPhone,
           amount: plan.price,
           reference,
-          description: `${plan.name} - CINEMA Rwanda`,
+          description: `${plan.name} - Lumina Cinema`,
         });
         // Save the MTN external ID so we can poll status later
         payment.notes = `MTN ExternalId: ${mtnExternalId} | Phone: ${paymentPhone}`;
