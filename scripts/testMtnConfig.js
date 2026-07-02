@@ -1,0 +1,12 @@
+require('dotenv').config();
+const { getConfig, isConfigured } = require('../utils/mtnMomo');
+const cfg = getConfig();
+console.log('MTN MoMo Configuration:');
+console.log('  Environment:', cfg.env);
+console.log('  Base URL:', cfg.baseUrl);
+console.log('  Currency:', cfg.currency);
+console.log('  Configured:', isConfigured());
+console.log('  Subscription Key:', cfg.subscriptionKey ? '✅ set' : '❌ missing');
+console.log('  API User:', cfg.apiUser ? '✅ set' : '❌ missing');
+console.log('  API Key:', cfg.apiKey ? '✅ set' : '❌ missing');
+console.log('  Callback URL:', cfg.callbackUrl || '(not set)');

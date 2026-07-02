@@ -16,17 +16,20 @@ const crypto = require('crypto');
 const BASE_URL = {
     sandbox: 'https://sandbox.momodeveloper.mtn.com',
     production: 'https://collection.momodeveloper.mtn.com',
+    mtnrwanda: 'https://proxy.momoapi.mtn.co.rw',
 };
 
 function getConfig() {
     const env = (process.env.MTN_MOMO_ENVIRONMENT || 'sandbox').toLowerCase();
+    // Allow explicit base URL override (e.g. Rwanda proxy)
+    const baseUrl = process.env.MTN_MOMO_BASE_URL || BASE_URL[env] || BASE_URL.sandbox;
     return {
         env,
-        baseUrl: BASE_URL[env] || BASE_URL.sandbox,
+        baseUrl,
         subscriptionKey: process.env.MTN_MOMO_SUBSCRIPTION_KEY || '',
         apiUser: process.env.MTN_MOMO_API_USER || '',
         apiKey: process.env.MTN_MOMO_API_KEY || '',
-        currency: process.env.MTN_MOMO_CURRENCY || (env === 'production' ? 'RWF' : 'EUR'),
+        currency: process.env.MTN_MOMO_CURRENCY || (env === 'production' || env === 'mtnrwanda' ? 'RWF' : 'EUR'),
         callbackUrl: process.env.MTN_MOMO_CALLBACK_URL || '',
     };
 }
@@ -98,7 +101,7 @@ async function requestToPay({ phone, amount, reference, description }) {
     const headers = {
         Authorization: `Bearer ${token}`,
         'X-Reference-Id': externalId,
-        'X-Target-Environment': cfg.env,
+        'X-Target-Environment': cfg.env === 'mtnrwanda' ? 'mtnrwanda' : cfg.env,
         'Ocp-Apim-Subscription-Key': cfg.subscriptionKey,
         'Content-Type': 'application/json',
     };
