@@ -90,6 +90,8 @@ const allowedOrigins = [
   // Production domains
   'https://cinemarwanda.com',
   'https://www.cinemarwanda.com',
+  'https://admin.cinemarwanda.com',
+  'https://www.admin.cinemarwanda.com',
   'https://cinemarwandafront-end.vercel.app',
   'https://admin-cinemarwanda.vercel.app',
   'https://cinemarwanda-backend.onrender.com',
