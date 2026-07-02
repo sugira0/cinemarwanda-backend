@@ -30,6 +30,8 @@ async function getAuth() {
     trustedOrigins: [
       'http://localhost:5173',
       'http://localhost:8081',
+      'https://cinemarwanda.com',
+      'https://www.cinemarwanda.com',
       'https://cinemarwandafront-end.vercel.app',
       'https://cinemarwanda-backend.onrender.com',
       'https://auth.expo.io',

@@ -87,6 +87,9 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:8090',
   'http://localhost:8081',
+  // Production domains
+  'https://cinemarwanda.com',
+  'https://www.cinemarwanda.com',
   'https://cinemarwandafront-end.vercel.app',
   'https://admin-cinemarwanda.vercel.app',
   'https://cinemarwanda-backend.onrender.com',
