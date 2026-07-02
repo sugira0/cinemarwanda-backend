@@ -10,21 +10,21 @@ module.exports = async function seed() {
     return;
   }
 
+  const passwordHash = await bcrypt.hash(password, 10);
   const existingUser = await User.findOne({ email });
 
   if (existingUser) {
-    // Only fix role/status — never overwrite a password the admin may have changed
-    let changed = false;
-    if (!existingUser.name)          { existingUser.name   = name;    changed = true; }
-    if (existingUser.role !== 'admin')  { existingUser.role   = 'admin'; changed = true; }
-    if (existingUser.status !== 'active') { existingUser.status = 'active'; changed = true; }
-    if (changed) await existingUser.save();
+    // Always sync role, status, name and password from env
+    existingUser.name = name;
+    existingUser.role = 'admin';
+    existingUser.status = 'active';
+    existingUser.password = passwordHash;
+    await existingUser.save();
     console.log(`Synced admin account for ${email}`);
     return;
   }
 
-  // First-time creation — set the seed password
-  const passwordHash = await bcrypt.hash(password, 10);
+  // First-time creation
   await User.create({
     name,
     email,
