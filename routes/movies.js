@@ -156,16 +156,17 @@ function buildPlaybackSource(movieId, source, deviceId, token = null, episodeId 
 
 router.get('/', async (req, res) => {
   try {
-    const { search, genre, type } = req.query;
+    const { search, genre, type, limit = 60, skip = 0 } = req.query;
     const query = {};
 
-    if (search) query.title = { $regex: search, $options: 'i' };
+    if (search) query.$text = { $search: search };   // uses text index — faster than $regex
     if (genre) query.genre = genre;
     if (type) query.type = type;
 
     const movies = await Movie.find(query)
       .sort({ createdAt: -1 })
-      .limit(120)
+      .skip(Number(skip))
+      .limit(Math.min(Number(limit), 60))            // hard cap at 60
       .select('title description genre year duration language country poster trailerUrl type featured views episodes.title episodes.season episodes.episode episodes.duration episodes.videoUrl episodes.videoLink createdAt updatedAt')
       .lean();
 

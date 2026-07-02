@@ -39,6 +39,8 @@ movieSchema.index({ createdAt: -1 });
 movieSchema.index({ authorId: 1, createdAt: -1 }); // author's films sorted by date
 movieSchema.index({ featured: 1, createdAt: -1 }); // featured films
 movieSchema.index({ type: 1, createdAt: -1 });     // browse by type
+movieSchema.index({ genre: 1, createdAt: -1 });    // browse by genre
+movieSchema.index({ type: 1, genre: 1, createdAt: -1 }); // combined filter
 movieSchema.index({ title: 'text', description: 'text' }, { default_language: 'none', language_override: 'lang_override' });
 
 module.exports = mongoose.model('Movie', movieSchema);

@@ -33,10 +33,11 @@ router.get('/', async (req, res) => {
         const songs = await Song.find(query)
             .sort({ createdAt: -1 })
             .skip(Number(skip))
-            .limit(Number(limit))
+            .limit(Math.min(Number(limit), 60))
             .select(SUMMARY_FIELDS)
             .lean();
 
+        res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
         res.json(songs);
     } catch (err) {
         res.status(500).json({ message: err.message });
