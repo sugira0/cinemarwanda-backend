@@ -76,8 +76,8 @@ router.post('/initiate', protect, async (req, res) => {
 
     // ── MTN MoMo real API ─────────────────────────────────────────────────────
     let mtnExternalId = null;
-    let ussd = buildUSSD(method, plan.price, reference, paymentPhone);
     let momoRequested = false;
+    let momoError = null;
 
     if (method === 'momo' && paymentPhone && mtnMomo.isConfigured()) {
       try {
@@ -87,14 +87,15 @@ router.post('/initiate', protect, async (req, res) => {
           reference,
           description: `${plan.name} - Lumina Cinema`,
         });
-        // Save the MTN external ID so we can poll status later
         payment.notes = `MTN ExternalId: ${mtnExternalId} | Phone: ${paymentPhone}`;
         await payment.save();
         momoRequested = true;
-        ussd = null; // no USSD needed — push prompt sent automatically
       } catch (momoErr) {
-        console.error('MTN MoMo request failed, falling back to manual:', momoErr.message);
-        // Fall through to manual flow
+        momoError = momoErr.message;
+        console.error('MTN MoMo request failed:', momoErr.message);
+        // Update notes with error
+        payment.notes = `MTN Error: ${momoErr.message} | Phone: ${paymentPhone}`;
+        await payment.save();
       }
     }
 
@@ -102,19 +103,22 @@ router.post('/initiate', protect, async (req, res) => {
       userId: await getAdminId(),
       type: 'system',
       title: `New payment - ${user.name}`,
-      message: `${user.name} initiated the ${plan.name} plan via ${method}. Ref: ${reference}`,
+      message: `${user.name} initiated the ${plan.name} plan via ${method}. Ref: ${reference}${momoError ? ` | MTN Error: ${momoError}` : ''}`,
       link: '/analytics',
     });
 
     return res.status(201).json({
       payment,
-      ussd,
+      ussd: null,   // USSD disabled — using MTN API only
       reference,
       momoRequested,
+      momoError: momoError || null,
       mtnExternalId,
       message: momoRequested
         ? 'A payment prompt has been sent to your phone. Approve it to activate your plan.'
-        : 'Payment initiated. Complete the MoMo request on your phone.',
+        : momoError
+          ? `MTN payment request failed: ${momoError}. Please try again.`
+          : 'Payment initiated.',
     });
   } catch (err) {
     return res.status(500).json({ message: err.message });
