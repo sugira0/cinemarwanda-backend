@@ -1,6 +1,6 @@
 const router = require('express').Router();
-const User   = require('../models/User');
-const Movie  = require('../models/Movie');
+const User = require('../models/User');
+const Movie = require('../models/Movie');
 const Notification = require('../models/Notification');
 const { protect, adminOnly } = require('../middleware/auth');
 const { publicContact, sanitizeEmail } = require('../utils/authContact');
@@ -52,10 +52,10 @@ router.get('/', protect, adminOnly, async (req, res) => {
   try {
     const { role, status, search, page = 1 } = req.query;
     const query = {};
-    if (role)   query.role   = role;
+    if (role) query.role = role;
     if (status) query.status = status;
     if (search) query.$or = [
-      { name:  { $regex: search, $options: 'i' } },
+      { name: { $regex: search, $options: 'i' } },
       { email: { $regex: search, $options: 'i' } },
       { phone: { $regex: search, $options: 'i' } }
     ];
@@ -103,7 +103,7 @@ router.get('/devices/activity', protect, adminOnly, async (req, res) => {
 
 router.get('/:id', protect, adminOnly, async (req, res) => {
   try {
-    const user   = await User.findById(req.params.id).select('-password -devices -sessions');
+    const user = await User.findById(req.params.id).select('-password -devices -sessions');
     if (!user) return res.status(404).json({ message: 'User not found' });
     const movies = await Movie.find({ authorId: req.params.id }).select('title views poster createdAt').limit(10);
     res.json({ user: serializeUser(user), movies });
@@ -122,9 +122,9 @@ router.patch('/:id/status', protect, adminOnly, async (req, res) => {
 
     // Notify user
     await Notification.create({
-      userId:  req.params.id,
-      type:    'system',
-      title:   status === 'suspended' ? '⚠ Account suspended' : '✓ Account reactivated',
+      userId: req.params.id,
+      type: 'system',
+      title: status === 'suspended' ? '⚠ Account suspended' : '✓ Account reactivated',
       message: status === 'suspended'
         ? `Your account has been suspended. ${reason || 'Contact support for more info.'}`
         : 'Your account has been reactivated. Welcome back!',
@@ -146,11 +146,11 @@ router.patch('/:id/role', protect, adminOnly, async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     await Notification.create({
-      userId:  req.params.id,
-      type:    'system',
-      title:   'Account role updated',
+      userId: req.params.id,
+      type: 'system',
+      title: 'Account role updated',
       message: `Your account role has been changed to ${role}.`,
-      link:    '/account'
+      link: '/account'
     });
 
     res.json({ message: `Role changed to ${role}`, user });
@@ -165,7 +165,7 @@ router.post('/:id/notify', protect, adminOnly, async (req, res) => {
 
     await Notification.create({
       userId: req.params.id,
-      type:   'system',
+      type: 'system',
       title, message, link: link || '/account'
     });
 
@@ -251,7 +251,7 @@ router.patch('/:id/subscription', protect, adminOnly, async (req, res) => {
 // GET subscription info
 router.get('/:id/subscription', protect, adminOnly, async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('subscription');
+    const user = await User.findById(req.params.id).select('subscription episodeCredits');
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     const subscription = user.subscription || { plan: 'free', active: false };
@@ -262,11 +262,34 @@ router.get('/:id/subscription', protect, adminOnly, async (req, res) => {
       plan: subscription.plan,
       active: subscription.active && !isExpired,
       expiresAt: subscription.expiresAt,
-      isExpired: isExpired,
+      isExpired,
+      episodeCredits: user.episodeCredits || 0,
       daysRemaining: subscription.expiresAt
         ? Math.max(0, Math.ceil((new Date(subscription.expiresAt) - now) / (1000 * 60 * 60 * 24)))
         : null,
     });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── DELETE (disable) subscription ────────────────────────────────────────────
+router.delete('/:id/subscription', protect, adminOnly, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    user.subscription = { plan: 'free', active: false, expiresAt: null };
+    user.episodeCredits = 0;
+    await user.save();
+
+    await Notification.create({
+      userId: req.params.id,
+      type: 'system',
+      title: 'Subscription removed',
+      message: 'Your subscription has been removed by an administrator. Contact support if you have questions.',
+      link: '/plans',
+    });
+
+    res.json({ message: 'Subscription removed', user: serializeUser(user) });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
