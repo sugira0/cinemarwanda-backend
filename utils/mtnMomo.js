@@ -104,11 +104,9 @@ async function requestToPay({ phone, amount, reference, description }) {
         'X-Target-Environment': cfg.env === 'mtnrwanda' ? 'mtnrwanda' : cfg.env,
         'Ocp-Apim-Subscription-Key': cfg.subscriptionKey,
         'Content-Type': 'application/json',
+        // NOTE: Callback URL omitted — status is polled via /mtn/status/:id
+        // Only add if the URL is registered in the MTN developer portal
     };
-
-    if (cfg.callbackUrl) {
-        headers['X-Callback-Url'] = cfg.callbackUrl;
-    }
 
     const res = await fetch(`${cfg.baseUrl}/collection/v1_0/requesttopay`, {
         method: 'POST',
