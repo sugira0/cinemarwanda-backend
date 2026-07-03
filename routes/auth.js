@@ -1409,8 +1409,13 @@ router.patch('/change-password', protect, async (req, res) => {
 });
 
 // ── Google OAuth (server-side popup flow) ─────────────────────────────────────
-const _getBackendOrigin = () => process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
-const _googleCallbackUri = () => `${_getBackendOrigin()}/api/auth/google/callback`;
+const _getBackendOrigin = (req) => {
+  if (process.env.BACKEND_URL) return process.env.BACKEND_URL.replace(/\/$/, '');
+  const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const protocol = forwardedProto || req.protocol;
+  return `${protocol}://${req.get('host')}`;
+};
+const _googleCallbackUri = (req) => `${_getBackendOrigin(req)}/api/auth/google/callback`;
 
 router.get('/google/authorize', (req, res) => {
   const { deviceId, deviceName, origin } = req.query;
@@ -1420,7 +1425,10 @@ router.get('/google/authorize', (req, res) => {
     origin: origin || 'http://localhost:5173',
   })).toString('base64');
 
-  const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, _googleCallbackUri());
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(503).send('Google Sign-In is not configured on the server.');
+  }
+  const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, _googleCallbackUri(req));
   const url = client.generateAuthUrl({ access_type: 'online', scope: ['openid', 'email', 'profile'], state });
   res.redirect(url);
 });
@@ -1443,7 +1451,7 @@ router.get('/google/callback', async (req, res) => {
   if (!code) return reply({ error: 'No authorization code received.' });
 
   try {
-    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, _googleCallbackUri());
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, _googleCallbackUri(req));
     const { tokens } = await client.getToken(code);
     const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: process.env.GOOGLE_CLIENT_ID });
     const payload = ticket.getPayload();
