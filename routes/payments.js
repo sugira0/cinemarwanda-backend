@@ -41,19 +41,10 @@ router.post('/initiate', protect, async (req, res) => {
     const user = await User.findById(req.user.id);
     const isCardPayment = method === 'card';
     const submittedPhone = normalizePhone(phone);
-    let paymentPhone = user?.phone || submittedPhone;
-
-    if (!isCardPayment && user?.phone && submittedPhone && submittedPhone !== user.phone) {
-      return res.status(400).json({ message: 'Use the mobile number saved on your account for subscription payments' });
-    }
+    const paymentPhone = submittedPhone || normalizePhone(user?.phone);
 
     if (!isCardPayment && !paymentPhone) {
-      return res.status(400).json({ message: 'Add a valid Rwanda mobile number to your account first' });
-    }
-
-    if (!isCardPayment && !user.phone) {
-      user.phone = paymentPhone;
-      await user.save();
+      return res.status(400).json({ message: 'Enter a valid Rwanda mobile number to pay with.' });
     }
 
     const reference = `CR-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
