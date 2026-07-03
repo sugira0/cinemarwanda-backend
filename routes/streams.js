@@ -6,8 +6,8 @@ const User = require('../models/User');
 const { protect } = require('../middleware/auth');
 const { requireSubscription } = require('../middleware/subscription');
 const { getUploadPath, isRemoteMediaPath } = require('../utils/media');
+const { getPlaybackEntitlement } = require('../utils/entitlements');
 
-const PLAN_LIMITS = { free: 0, basic: 1, standard: 2, premium: 4 };
 const ACTIVE_STREAM_WINDOW_MS = 60000;
 
 function hasVideoSource(entry) {
@@ -53,7 +53,7 @@ router.post('/start', protect, async (req, res) => {
 
     const token = req.headers.authorization?.split(' ')[1] || null;
     const [user, movie] = await Promise.all([
-      User.findById(req.user.id).select('subscription role'),
+      User.findById(req.user.id).select('_id'),
       Movie.findById(movieId).select('videoUrl videoLink episodes'),
     ]);
 
@@ -72,25 +72,17 @@ router.post('/start', protect, async (req, res) => {
 
     const playback = buildPlaybackSource(movie._id, playbackEntry, deviceId, token, episodeId);
 
-    if (user.role === 'admin' || user.role === 'author') {
-      await Stream.findOneAndUpdate(
-        { userId: req.user.id, deviceId },
-        { userId: req.user.id, movieId, deviceId, lastPing: new Date() },
-        { upsert: true, new: true },
-      );
-      return res.json(playback);
-    }
-
-    const plan = user.subscription?.plan || 'free';
-    const limit = PLAN_LIMITS[plan] || 0;
-
-    if (limit === 0) {
+    const entitlement = await getPlaybackEntitlement(req.user.id, movieId, episodeId || null, {
+      consumeCredit: true,
+    });
+    if (!entitlement.allowed) {
       return res.status(403).json({
         allowed: false,
         code: 'NO_SUBSCRIPTION',
-        message: 'Subscription required to watch.',
+        message: 'This title is not included in your current access. Choose a plan or use an episode credit.',
       });
     }
+    const { limit, plan } = entitlement;
 
     const activeStreams = await Stream.find({
       userId: req.user.id,
@@ -118,6 +110,8 @@ router.post('/start', protect, async (req, res) => {
       ...playback,
       limit,
       active: activeStreams.length + 1,
+      entitlement: entitlement.source,
+      creditsRemaining: entitlement.creditsRemaining,
     });
   } catch (err) {
     return res.status(500).json({ message: err.message });

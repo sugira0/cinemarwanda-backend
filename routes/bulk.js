@@ -103,9 +103,9 @@ router.post('/users/subscription', protect, adminOnly, async (req, res) => {
             return res.status(400).json({ message: 'ids array required' });
         }
 
-        const validPlans = ['free', 'basic', 'standard', 'premium'];
+        const validPlans = ['free', 'basic', 'standard', 'premium', 'weekly'];
         if (!plan || !validPlans.includes(plan)) {
-            return res.status(400).json({ message: 'Invalid plan. Must be: free, basic, standard, or premium' });
+            return res.status(400).json({ message: 'Invalid plan. Must be: free, basic, standard, premium, or weekly' });
         }
 
         let subscription;

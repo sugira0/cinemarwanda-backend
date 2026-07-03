@@ -14,6 +14,7 @@ const paymentSchema = new mongoose.Schema({
   // PPV-specific
   movieId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Movie', default: null },
   episodeId:   { type: String, default: null },
+  entitlementGrantedAt: { type: Date, default: null },
   notes:       { type: String },
 }, { timestamps: true });
 

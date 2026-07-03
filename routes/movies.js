@@ -300,10 +300,11 @@ router.post(
         duration,
         language,
         country: country || 'Rwanda',
+        type: type || 'movie',
         featured: req.user.role === 'admin' && featured === 'true',
         poster: posterAsset?.ref || null,
         videoUrl: videoAsset?.ref || null,
-        videoLink: videoLink || null,
+        videoLink: videoAsset ? null : (videoLink || null),
         trailerUrl: req.body.trailerUrl || null,
         cast: cast ? cast.split(',').map((value) => value.trim()).filter(Boolean) : [],
         authorId: req.user.id,
@@ -373,6 +374,7 @@ router.put(
         uploadedAssets.push(videoAsset);
         if (movie.videoUrl) staleAssets.push({ ref: movie.videoUrl, resourceType: 'video' });
         movie.videoUrl = videoAsset.ref;
+        movie.videoLink = null;
       }
 
       await movie.save();

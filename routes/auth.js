@@ -51,6 +51,14 @@ const MIN_PASSWORD_LENGTH = 6;
 const signToken = (user, deviceId) =>
   jwt.sign({ id: user._id, role: user.role, deviceId }, SECRET, { expiresIn: '30d' });
 
+const publicSubscription = (subscription) => {
+  const value = subscription?.toObject ? subscription.toObject() : subscription;
+  if (!value) return { plan: 'free', active: false, expiresAt: null };
+  const timedPlan = ['basic', 'standard', 'premium', 'weekly'].includes(value.plan);
+  const unexpired = value.expiresAt && new Date(value.expiresAt) > new Date();
+  return { ...value, active: Boolean(value.active && timedPlan && unexpired) };
+};
+
 const safeUser = (user, extra = {}) => ({
   id: user._id,
   name: user.name,
@@ -58,7 +66,7 @@ const safeUser = (user, extra = {}) => ({
   phone: user.phone || null,
   contact: publicContact(user),
   role: user.role,
-  subscription: user.subscription || { plan: 'free', active: false },
+  subscription: publicSubscription(user.subscription),
   episodeCredits: user.episodeCredits || 0,
   ...extra,
 });

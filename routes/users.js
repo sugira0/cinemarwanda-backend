@@ -198,10 +198,10 @@ router.post('/broadcast', protect, adminOnly, async (req, res) => {
 router.patch('/:id/subscription', protect, adminOnly, async (req, res) => {
   try {
     const { plan, durationDays } = req.body;
-    const validPlans = ['free', 'basic', 'standard', 'premium'];
+    const validPlans = ['free', 'basic', 'standard', 'premium', 'weekly'];
 
     if (!plan || !validPlans.includes(plan)) {
-      return res.status(400).json({ message: 'Invalid plan. Must be: free, basic, standard, or premium' });
+      return res.status(400).json({ message: 'Invalid plan. Must be: free, basic, standard, premium, or weekly' });
     }
 
     const user = await User.findById(req.params.id);

@@ -6,8 +6,8 @@ const SubscriptionPlan = require('../models/SubscriptionPlan');
 const User = require('../models/User');
 const { adminOnly, protect } = require('../middleware/auth');
 const { normalizePhone, publicContact } = require('../utils/authContact');
-const { sendPushToUsers } = require('../utils/pushNotification');
 const mtnMomo = require('../utils/mtnMomo');
+const { grantCompletedPayment } = require('../utils/paymentEntitlements');
 
 const PAYMENT_METHODS = new Set(['momo', 'airtel', 'card']);
 
@@ -18,9 +18,19 @@ async function getPlan(planId) {
 
 router.get('/my', protect, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('subscription');
+    const user = await User.findById(req.user.id).select('subscription episodeCredits purchasedContent');
     const payments = await Payment.find({ userId: req.user.id }).sort({ createdAt: -1 }).limit(10);
-    return res.json({ subscription: user?.subscription, payments });
+    const subscription = user?.subscription?.toObject?.() || user?.subscription;
+    if (subscription?.active && (!subscription.expiresAt || new Date(subscription.expiresAt) <= new Date())) {
+      subscription.active = false;
+      await User.updateOne({ _id: req.user.id }, { $set: { 'subscription.active': false } });
+    }
+    return res.json({
+      subscription,
+      episodeCredits: user?.episodeCredits || 0,
+      purchasedTitles: user?.purchasedContent?.length || 0,
+      payments,
+    });
   } catch (err) {
     return res.status(500).json({ message: err.message });
   }
@@ -136,6 +146,9 @@ router.get('/mtn/status/:paymentId', protect, async (req, res) => {
       return res.status(403).json({ message: 'Not your payment' });
     }
     if (payment.status !== 'pending') {
+      if (payment.status === 'completed' && !payment.entitlementGrantedAt) {
+        await grantCompletedPayment(payment._id);
+      }
       return res.json({ status: payment.status, payment });
     }
 
@@ -153,42 +166,7 @@ router.get('/mtn/status/:paymentId', protect, async (req, res) => {
       payment.status = 'completed';
       await payment.save();
 
-      // Activate based on plan type
-      if (payment.plan === 'episodes7') {
-        await User.findByIdAndUpdate(payment.userId, { $inc: { episodeCredits: 7 } });
-        await Notification.create({
-          userId: payment.userId,
-          type: 'system',
-          title: '7 Episodes Pack activated ✅',
-          message: 'You now have 7 episode credits. Use them to unlock any movies or episodes.',
-          link: '/movies',
-        });
-        sendPushToUsers({
-          userIds: [String(payment.userId)],
-          title: '🎬 7 Episodes Pack Active!',
-          body: 'You have 7 episode credits. Enjoy!',
-          type: 'system',
-          link: '/movies',
-        }).catch(() => { });
-      } else if (payment.expiresAt) {
-        await User.findByIdAndUpdate(payment.userId, {
-          subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
-        });
-        await Notification.create({
-          userId: payment.userId,
-          type: 'system',
-          title: 'Payment confirmed ✅',
-          message: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}.`,
-          link: '/account',
-        });
-        sendPushToUsers({
-          userIds: [String(payment.userId)],
-          title: '✅ Subscription Activated!',
-          body: `Your ${payment.plan} plan is now active. Enjoy unlimited streaming!`,
-          type: 'system',
-          link: '/account',
-        }).catch(() => { });
-      }
+      await grantCompletedPayment(payment._id);
       return res.json({ status: 'completed', payment });
     }
 
@@ -214,36 +192,21 @@ router.post('/mtn/callback', async (req, res) => {
     // Find payment by MTN external ID stored in notes
     const payment = await Payment.findOne({
       notes: { $regex: externalId, $options: 'i' },
-      status: 'pending',
     });
 
     if (!payment) {
-      return res.status(200).json({ message: 'Payment not found or already processed' });
+      return res.status(200).json({ message: 'Payment not found' });
+    }
+    if (payment.status === 'completed') {
+      if (!payment.entitlementGrantedAt) await grantCompletedPayment(payment._id);
+      return res.status(200).json({ received: true, alreadyCompleted: true });
     }
 
     if (status === 'SUCCESSFUL') {
       payment.status = 'completed';
       await payment.save();
 
-      if (payment.expiresAt) {
-        await User.findByIdAndUpdate(payment.userId, {
-          subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
-        });
-        await Notification.create({
-          userId: payment.userId,
-          type: 'system',
-          title: 'Payment confirmed ✅',
-          message: `Your ${payment.plan} plan is now active.`,
-          link: '/account',
-        });
-        sendPushToUsers({
-          userIds: [String(payment.userId)],
-          title: '✅ Subscription Activated!',
-          body: `Your ${payment.plan} plan is now active. Enjoy unlimited streaming!`,
-          type: 'system',
-          link: '/account',
-        }).catch(() => { });
-      }
+      await grantCompletedPayment(payment._id);
     } else if (status === 'FAILED') {
       payment.status = 'failed';
       payment.notes = `${payment.notes || ''} | FAILED: ${reason || 'unknown'}`;
@@ -265,76 +228,23 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
     }
 
     if (payment.status === 'completed') {
-      return res.status(400).json({ message: 'Already completed' });
+      const entitlement = await grantCompletedPayment(payment._id);
+      return res.json({ message: 'Already completed', payment, entitlement });
     }
 
     payment.status = 'completed';
     await payment.save();
 
-    if (payment.plan === 'ppv' && payment.movieId) {
-      await User.findByIdAndUpdate(payment.userId, {
-        $push: {
-          purchasedContent: {
-            movieId: payment.movieId,
-            episodeId: payment.episodeId || null,
-            paidAt: new Date(),
-            amount: payment.amount,
-            reference: payment.reference,
-          },
-        },
-      });
-      await Notification.create({
-        userId: payment.userId,
-        type: 'system',
-        title: 'Content unlocked',
-        message: `Your pay-per-view purchase is confirmed. You can now watch the content.`,
-        link: `/movies/${payment.movieId}`,
-      });
-      // Push notification
-      sendPushToUsers({
-        userIds: [String(payment.userId)],
-        title: '🎬 Content Unlocked!',
-        body: 'Your pay-per-view purchase is confirmed. Tap to watch now.',
-        type: 'system',
-        link: `/movies/${payment.movieId}`,
-      }).catch(() => { });
-    } else if (payment.plan === 'episodes7') {
-      // Add 7 episode credits to the user
-      await User.findByIdAndUpdate(payment.userId, { $inc: { episodeCredits: 7 } });
-      await Notification.create({
-        userId: payment.userId,
-        type: 'system',
-        title: '7 Episodes Pack activated ✅',
-        message: 'You now have 7 episode credits. Use them to unlock any movies or episodes.',
-        link: '/movies',
-      });
-      sendPushToUsers({
-        userIds: [String(payment.userId)],
-        title: '🎬 7 Episodes Pack Active!',
-        body: 'You have 7 episode credits to use on any movies or episodes. Enjoy!',
-        type: 'system',
-        link: '/movies',
-      }).catch(() => { });
-    } else if (payment.expiresAt) {
-      await User.findByIdAndUpdate(payment.userId, {
-        subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
-      });
-      await Notification.create({
-        userId: payment.userId,
-        type: 'system',
-        title: 'Payment confirmed',
-        message: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}.`,
-        link: '/account',
-      });
-      // Push notification
-      sendPushToUsers({
-        userIds: [String(payment.userId)],
-        title: '✅ Subscription Activated!',
-        body: `Your ${payment.plan} plan is now active until ${new Date(payment.expiresAt).toLocaleDateString()}. Enjoy unlimited streaming!`,
-        type: 'system',
-        link: '/account',
-      }).catch(() => { });
-    }
+    const entitlement = await grantCompletedPayment(payment._id);
+    await Notification.create({
+      userId: payment.userId,
+      type: 'system',
+      title: entitlement.type === 'subscription' ? 'Subscription activated' : 'Paid access activated',
+      message: entitlement.type === 'subscription'
+        ? `Your ${payment.plan} plan is active until ${new Date(entitlement.expiresAt).toLocaleDateString()}.`
+        : 'Your payment is confirmed and your purchased access is ready.',
+      link: payment.movieId ? `/movies/${payment.movieId}` : '/movies',
+    });
 
     return res.json({ message: 'Confirmed', payment });
   } catch (err) {
