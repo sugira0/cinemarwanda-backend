@@ -59,6 +59,7 @@ const safeUser = (user, extra = {}) => ({
   contact: publicContact(user),
   role: user.role,
   subscription: user.subscription || { plan: 'free', active: false },
+  episodeCredits: user.episodeCredits || 0,
   ...extra,
 });
 
@@ -1420,7 +1421,7 @@ router.get('/google/callback', async (req, res) => {
   const { code, state, error } = req.query;
 
   let st = { origin: 'http://localhost:5173', deviceId: `web_${Date.now()}`, deviceName: 'Web Browser' };
-  try { st = { ...st, ...JSON.parse(Buffer.from(state || '', 'base64').toString()) }; } catch {}
+  try { st = { ...st, ...JSON.parse(Buffer.from(state || '', 'base64').toString()) }; } catch { }
 
   const reply = (payload) => res.send(
     `<!DOCTYPE html><html><body><script>` +

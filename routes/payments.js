@@ -158,8 +158,24 @@ router.get('/mtn/status/:paymentId', protect, async (req, res) => {
       payment.status = 'completed';
       await payment.save();
 
-      // Activate subscription
-      if (payment.expiresAt) {
+      // Activate based on plan type
+      if (payment.plan === 'episodes7') {
+        await User.findByIdAndUpdate(payment.userId, { $inc: { episodeCredits: 7 } });
+        await Notification.create({
+          userId: payment.userId,
+          type: 'system',
+          title: '7 Episodes Pack activated ✅',
+          message: 'You now have 7 episode credits. Use them to unlock any movies or episodes.',
+          link: '/movies',
+        });
+        sendPushToUsers({
+          userIds: [String(payment.userId)],
+          title: '🎬 7 Episodes Pack Active!',
+          body: 'You have 7 episode credits. Enjoy!',
+          type: 'system',
+          link: '/movies',
+        }).catch(() => { });
+      } else if (payment.expiresAt) {
         await User.findByIdAndUpdate(payment.userId, {
           subscription: { plan: payment.plan, expiresAt: payment.expiresAt, active: true },
         });
@@ -286,6 +302,23 @@ router.post('/:id/confirm', protect, adminOnly, async (req, res) => {
         body: 'Your pay-per-view purchase is confirmed. Tap to watch now.',
         type: 'system',
         link: `/movies/${payment.movieId}`,
+      }).catch(() => { });
+    } else if (payment.plan === 'episodes7') {
+      // Add 7 episode credits to the user
+      await User.findByIdAndUpdate(payment.userId, { $inc: { episodeCredits: 7 } });
+      await Notification.create({
+        userId: payment.userId,
+        type: 'system',
+        title: '7 Episodes Pack activated ✅',
+        message: 'You now have 7 episode credits. Use them to unlock any movies or episodes.',
+        link: '/movies',
+      });
+      sendPushToUsers({
+        userIds: [String(payment.userId)],
+        title: '🎬 7 Episodes Pack Active!',
+        body: 'You have 7 episode credits to use on any movies or episodes. Enjoy!',
+        type: 'system',
+        link: '/movies',
       }).catch(() => { });
     } else if (payment.expiresAt) {
       await User.findByIdAndUpdate(payment.userId, {

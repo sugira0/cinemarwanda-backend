@@ -58,10 +58,12 @@ const userSchema = new mongoose.Schema({
   resetToken: { type: String },
   resetTokenExpiry: { type: Date },
   subscription: {
-    plan: { type: String, enum: ['free', 'basic', 'standard', 'premium'], default: 'free' },
+    plan: { type: String, enum: ['free', 'basic', 'standard', 'premium', 'weekly', 'episodes7', 'ppv'], default: 'free' },
     expiresAt: { type: Date },
     active: { type: Boolean, default: false }
   },
+  // Episode credits (for 7-episode pack)
+  episodeCredits: { type: Number, default: 0 },
   // ── Watch progress (continue watching) ───────────────────────────────────
   watchProgress: [{
     movieId: { type: mongoose.Schema.Types.ObjectId, ref: 'Movie', required: true },

@@ -5,11 +5,12 @@ const { protect, adminOnly } = require('../middleware/auth');
 
 // Seed defaults if no plans exist yet
 const SEED_PLANS = [
-  { id: 'basic',    name: 'Basic',    description: 'Full catalog access. 1 concurrent stream.', price: 2000,  durationDays: 30, streams: 1, features: ['Full catalog access', '1 concurrent stream', 'MTN MoMo or Airtel Money'], order: 1 },
-  { id: 'standard', name: 'Standard', description: 'Full catalog access. 2 concurrent streams.', price: 5000,  durationDays: 30, streams: 2, features: ['Full catalog access', '2 concurrent streams', 'MTN MoMo or Airtel Money'], order: 2 },
-  { id: 'premium',  name: 'Premium',  description: 'Full catalog access. 4 concurrent streams.', price: 10000, durationDays: 30, streams: 4, features: ['Full catalog access', '4 concurrent streams', 'MTN MoMo or Airtel Money'], order: 3 },
-  { id: 'weekly',   name: 'Weekly',   description: 'Full catalog access for 7 days.',            price: 2000,  durationDays: 7,  streams: 2, features: ['Full catalog access', '2 concurrent streams', 'MTN MoMo or Airtel Money', 'No monthly commitment'], order: 4 },
-  { id: 'ppv',      name: 'Pay Per View', description: 'Pay 100 RWF to unlock one movie or episode permanently.', price: 100, durationDays: 36500, streams: 1, features: ['One movie or episode', 'Permanent access', 'MTN MoMo or Airtel Money'], order: 5 },
+  { id: 'basic', name: 'Basic', description: 'Full catalog access. 1 concurrent stream.', price: 2000, durationDays: 30, streams: 1, features: ['Full catalog access', '1 concurrent stream', 'MTN MoMo or Airtel Money'], order: 1 },
+  { id: 'standard', name: 'Standard', description: 'Full catalog access. 2 concurrent streams.', price: 5000, durationDays: 30, streams: 2, features: ['Full catalog access', '2 concurrent streams', 'MTN MoMo or Airtel Money'], order: 2 },
+  { id: 'premium', name: 'Premium', description: 'Full catalog access. 4 concurrent streams.', price: 10000, durationDays: 30, streams: 4, features: ['Full catalog access', '4 concurrent streams', 'MTN MoMo or Airtel Money'], order: 3 },
+  { id: 'weekly', name: 'Weekly', description: 'Full catalog access for 7 days.', price: 2000, durationDays: 7, streams: 2, features: ['Full catalog access', '2 concurrent streams', 'MTN MoMo or Airtel Money', 'No monthly commitment'], order: 4 },
+  { id: 'episodes7', name: '7 Episodes Pack', description: 'Unlock any 7 episodes or movies for 500 RWF.', price: 500, durationDays: 30, streams: 1, features: ['Unlock 7 episodes or movies', 'Valid for 30 days', 'MTN MoMo or Airtel Money', 'No monthly commitment'], order: 5 },
+  { id: 'ppv', name: 'Single Episode', description: 'Pay 100 RWF to unlock one movie or episode permanently.', price: 100, durationDays: 36500, streams: 1, features: ['One movie or episode', 'Permanent access', 'MTN MoMo or Airtel Money'], order: 6 },
 ];
 
 async function ensureSeedPlans() {
@@ -47,7 +48,7 @@ router.get('/', protect, adminOnly, async (req, res) => {
     const enriched = plans.map(p => ({
       ...p.toObject(),
       subscribers: statsMap[p.id]?.subscribers || 0,
-      revenue:     statsMap[p.id]?.revenue     || 0,
+      revenue: statsMap[p.id]?.revenue || 0,
     }));
 
     res.json(enriched);
@@ -69,15 +70,15 @@ router.post('/', protect, adminOnly, async (req, res) => {
     if (exists) return res.status(400).json({ message: `Plan with id "${id}" already exists.` });
 
     const plan = await SubscriptionPlan.create({
-      id:           id.toLowerCase().trim(),
-      name:         String(name).trim(),
-      description:  String(description || '').trim(),
-      price:        Math.max(0, Number(price)),
+      id: id.toLowerCase().trim(),
+      name: String(name).trim(),
+      description: String(description || '').trim(),
+      price: Math.max(0, Number(price)),
       durationDays: Math.max(1, Number(durationDays)),
-      streams:      Math.max(1, Number(streams || 1)),
-      features:     Array.isArray(features) ? features.filter(Boolean) : [],
-      active:       active !== false,
-      order:        Number(order || 0),
+      streams: Math.max(1, Number(streams || 1)),
+      features: Array.isArray(features) ? features.filter(Boolean) : [],
+      active: active !== false,
+      order: Number(order || 0),
     });
 
     res.status(201).json(plan);
@@ -94,14 +95,14 @@ router.put('/:id', protect, adminOnly, async (req, res) => {
 
     const { name, description, price, durationDays, streams, features, active, order } = req.body;
 
-    if (name        !== undefined) plan.name         = String(name).trim();
-    if (description !== undefined) plan.description  = String(description).trim();
-    if (price       !== undefined) plan.price        = Math.max(0, Number(price));
-    if (durationDays!== undefined) plan.durationDays = Math.max(1, Number(durationDays));
-    if (streams     !== undefined) plan.streams      = Math.max(1, Number(streams));
-    if (features    !== undefined) plan.features     = Array.isArray(features) ? features.filter(Boolean) : [];
-    if (active      !== undefined) plan.active       = Boolean(active);
-    if (order       !== undefined) plan.order        = Number(order);
+    if (name !== undefined) plan.name = String(name).trim();
+    if (description !== undefined) plan.description = String(description).trim();
+    if (price !== undefined) plan.price = Math.max(0, Number(price));
+    if (durationDays !== undefined) plan.durationDays = Math.max(1, Number(durationDays));
+    if (streams !== undefined) plan.streams = Math.max(1, Number(streams));
+    if (features !== undefined) plan.features = Array.isArray(features) ? features.filter(Boolean) : [];
+    if (active !== undefined) plan.active = Boolean(active);
+    if (order !== undefined) plan.order = Number(order);
 
     await plan.save();
     res.json(plan);
