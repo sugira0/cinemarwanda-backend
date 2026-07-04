@@ -1417,6 +1417,15 @@ const _getBackendOrigin = (req) => {
 };
 const _googleCallbackUri = (req) => `${_getBackendOrigin(req)}/api/auth/google/callback`;
 
+// Public by design: OAuth client IDs are browser-visible identifiers, never
+// secrets. This runtime endpoint prevents Vercel build-env omissions from
+// disabling Google Identity Services.
+router.get('/google/config', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  if (!clientId) return res.status(503).json({ message: 'Google Sign-In is not configured.' });
+  return res.json({ clientId });
+});
+
 router.get('/google/authorize', (req, res) => {
   const { deviceId, deviceName, origin } = req.query;
   const state = Buffer.from(JSON.stringify({
