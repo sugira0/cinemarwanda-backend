@@ -201,6 +201,7 @@ async function findOrCreateFirebaseUser(decoded, req) {
   if (!user) {
     user = await User.create({
       firebaseUid: decoded.uid,
+      authProvider: 'email',
       name: String(req.body.name || decoded.name || email.split('@')[0]).trim(),
       email,
       phone: normalizedPhone || undefined,
@@ -1192,6 +1193,7 @@ router.get('/devices', async (req, res) => {
 
 router.get('/me', async (req, res) => {
   try {
+    res.set('Cache-Control', 'private, no-store, max-age=0');
     const token = getRequestToken(req);
     if (!token) return res.status(401).json({ message: 'No token' });
 
@@ -1203,6 +1205,34 @@ router.get('/me', async (req, res) => {
     res.json({ user: safeUser(user, { actorId }) });
   } catch {
     res.status(401).json({ message: 'Invalid token' });
+  }
+});
+
+// Lightweight access-state sync for payment/admin entitlement changes.
+router.get('/access', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'private, no-store, max-age=0');
+    const token = getRequestToken(req);
+    if (!token) return res.status(401).json({ message: 'No token' });
+
+    const auth = await resolveAuthToken(token);
+    const user = await User.findById(auth.userId).select('subscription episodeCredits purchasedContent updatedAt');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const subscription = user.subscription?.toObject?.() || user.subscription || { plan: 'free', active: false, expiresAt: null };
+    if (subscription.active && (!subscription.expiresAt || new Date(subscription.expiresAt) <= new Date())) {
+      subscription.active = false;
+      await User.updateOne({ _id: user._id }, { $set: { 'subscription.active': false } });
+    }
+
+    return res.json({
+      subscription,
+      episodeCredits: user.episodeCredits || 0,
+      purchasedTitles: user.purchasedContent?.length || 0,
+      updatedAt: user.updatedAt,
+    });
+  } catch {
+    return res.status(401).json({ message: 'Invalid token' });
   }
 });
 
@@ -1474,6 +1504,7 @@ router.get('/google/callback', async (req, res) => {
     if (!user) {
       user = await User.create({
         firebaseUid: uidField,
+        authProvider: 'google',
         name: payload.name || normalizedEmail.split('@')[0],
         email: normalizedEmail,
         role: 'viewer',
@@ -1568,6 +1599,7 @@ router.post('/google', async (req, res) => {
     if (!user) {
       user = await User.create({
         firebaseUid: uidField,
+        authProvider: 'google',
         name: name || normalizedEmail.split('@')[0],
         email: normalizedEmail,
         role: 'viewer',

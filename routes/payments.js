@@ -140,6 +140,7 @@ async function getAdminId() {
 // ── GET check MTN payment status (poll) ───────────────────────────────────────
 router.get('/mtn/status/:paymentId', protect, async (req, res) => {
   try {
+    res.set('Cache-Control', 'private, no-store, max-age=0');
     const payment = await Payment.findById(req.params.paymentId);
     if (!payment) return res.status(404).json({ message: 'Payment not found' });
     if (String(payment.userId) !== String(req.user.id)) {

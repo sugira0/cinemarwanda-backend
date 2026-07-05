@@ -25,10 +25,11 @@ function serializePayment(payment) {
 
 router.get('/', protect, adminOnly, async (req, res) => {
   try {
+    const newUserSince = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000));
     const [
       totalMovies, totalUsers, totalComments,
       topMovies, recentUsers, genreStats,
-      totalRevenue, pendingPayments, recentPayments,
+      totalRevenue, paymentStatusTotals, newUsers, recentPayments,
       totalViewsStats, paidUsers, topActors
     ] = await Promise.all([
       Movie.countDocuments(),
@@ -42,8 +43,13 @@ router.get('/', protect, adminOnly, async (req, res) => {
         { $sort: { views: -1 } }
       ]),
       Payment.aggregate([{ $match: { status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-      Payment.countDocuments({ status: 'pending' }),
+      Payment.aggregate([
+        { $match: { status: { $in: ['pending', 'failed'] } } },
+        { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+      ]),
+      User.countDocuments({ createdAt: { $gte: newUserSince } }),
       Payment.find().sort({ createdAt: -1 }).limit(10).populate('userId', 'name email phone'),
+      Movie.aggregate([{ $group: { _id: null, total: { $sum: '$views' } } }]),
       // Paid users — active subscriptions
       User.find({ 'subscription.active': true, 'subscription.expiresAt': { $gt: new Date() } })
         .select('name email phone subscription.plan subscription.expiresAt')
@@ -57,16 +63,23 @@ router.get('/', protect, adminOnly, async (req, res) => {
       ])
     ]);
 
-    const totalViews = topMovies.reduce((s, m) => s + (m.views || 0), 0);
+    const paymentStatus = Object.fromEntries(paymentStatusTotals.map((item) => [item._id, item]));
+    const totalViews = totalViewsStats[0]?.total || 0;
 
     res.json({
       totalMovies, totalUsers, totalComments, totalViews,
       totalRevenue: totalRevenue[0]?.total || 0,
-      pendingPayments,
+      newUsers,
+      newUserPeriodDays: 30,
+      pendingPayments: paymentStatus.pending?.count || 0,
+      pendingAmount: paymentStatus.pending?.amount || 0,
+      failedPayments: paymentStatus.failed?.count || 0,
+      failedAmount: paymentStatus.failed?.amount || 0,
       topMovies,
       recentUsers: recentUsers.map(serializeUser),
       genreStats,
       recentPayments: recentPayments.map(serializePayment),
+      activeSubscribers: paidUsers.length,
       paidUsers: paidUsers.map(serializeUser),
       topActors
     });

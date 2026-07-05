@@ -10,6 +10,11 @@ function serializeUser(user) {
   payload.email = sanitizeEmail(payload.email);
   payload.phone = payload.phone || null;
   payload.contact = publicContact(payload);
+  const federatedIdentity = /^(google|firebase):/i.test(String(payload.firebaseUid || ''));
+  payload.authProvider = payload.authProvider === 'google' || (!payload.authProvider && federatedIdentity)
+    ? 'google'
+    : 'email';
+  delete payload.firebaseUid;
   return payload;
 }
 
@@ -50,15 +55,22 @@ function serializeAdminDevice(user, device) {
 // ── GET all users (with filters) ─────────────────────────────────────────────
 router.get('/', protect, adminOnly, async (req, res) => {
   try {
-    const { role, status, search, page = 1 } = req.query;
+    const { role, status, provider, search, page = 1 } = req.query;
     const query = {};
+    const conditions = [];
     if (role) query.role = role;
     if (status) query.status = status;
-    if (search) query.$or = [
+    if (provider === 'google') conditions.push({ $or: [{ authProvider: 'google' }, { firebaseUid: /^(google|firebase):/i }] });
+    if (provider === 'email') conditions.push({ $and: [
+      { $or: [{ authProvider: 'email' }, { authProvider: { $exists: false } }] },
+      { $or: [{ firebaseUid: { $exists: false } }, { firebaseUid: null }, { firebaseUid: { $not: /^(google|firebase):/i } }] },
+    ] });
+    if (search) conditions.push({ $or: [
       { name: { $regex: search, $options: 'i' } },
       { email: { $regex: search, $options: 'i' } },
       { phone: { $regex: search, $options: 'i' } }
-    ];
+    ] });
+    if (conditions.length) query.$and = conditions;
     const total = await User.countDocuments(query);
     const users = await User.find(query)
       .select('-password -devices -sessions -resetToken -resetTokenExpiry')
@@ -198,16 +210,18 @@ router.post('/broadcast', protect, adminOnly, async (req, res) => {
 router.patch('/:id/subscription', protect, adminOnly, async (req, res) => {
   try {
     const { plan, durationDays } = req.body;
-    const validPlans = ['free', 'basic', 'standard', 'premium', 'weekly'];
+    const validPlans = ['free', 'basic', 'standard', 'premium', 'weekly', 'episodes7'];
 
     if (!plan || !validPlans.includes(plan)) {
-      return res.status(400).json({ message: 'Invalid plan. Must be: free, basic, standard, premium, or weekly' });
+      return res.status(400).json({ message: 'Invalid manual access plan.' });
     }
 
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    if (plan === 'free') {
+    if (plan === 'episodes7') {
+      user.episodeCredits = (user.episodeCredits || 0) + 7;
+    } else if (plan === 'free') {
       user.subscription = {
         plan: 'free',
         active: false,
@@ -231,19 +245,24 @@ router.patch('/:id/subscription', protect, adminOnly, async (req, res) => {
     await Notification.create({
       userId: req.params.id,
       type: 'system',
-      title: `${plan.charAt(0).toUpperCase() + plan.slice(1)} plan updated`,
-      message: plan === 'free'
+      title: plan === 'episodes7' ? 'Episode pack added' : `${plan.charAt(0).toUpperCase() + plan.slice(1)} plan updated`,
+      message: plan === 'episodes7'
+        ? 'Seven episode credits have been added to your account.'
+        : plan === 'free'
         ? 'Your paid subscription access has been removed.'
         : `Your ${plan} subscription is active for ${Number.parseInt(durationDays, 10)} days.`,
       link: '/plans',
     });
 
     res.json({
-      message: plan === 'free'
+      message: plan === 'episodes7'
+        ? '7 episode credits added'
+        : plan === 'free'
         ? 'Subscription reset to free'
         : `${plan} subscription assigned for ${Number.parseInt(durationDays, 10)} days`,
       user: serializeUser(user),
       subscription: user.subscription,
+      episodeCredits: user.episodeCredits || 0,
     });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });

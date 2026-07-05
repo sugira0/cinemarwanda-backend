@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
   firebaseUid: { type: String, unique: true, sparse: true, trim: true },
+  authProvider: { type: String, enum: ['email', 'google'], default: 'email', index: true },
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, trim: true, lowercase: true },
   phone: { type: String, unique: true, sparse: true, trim: true },

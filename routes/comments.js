@@ -76,7 +76,12 @@ router.delete('/:id', protect, async (req, res) => {
       return res.status(404).json({ message: 'Not found' });
     }
 
-    if (String(comment.userId) !== String(req.user.id) && req.user.role !== 'admin') {
+    const movie = req.user.role === 'author'
+      ? await Movie.findById(comment.movieId).select('authorId').lean()
+      : null;
+    const ownsComment = String(comment.userId) === String(req.user.id);
+    const ownsMovie = movie && String(movie.authorId) === String(req.user.id);
+    if (!ownsComment && !ownsMovie && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not allowed' });
     }
 

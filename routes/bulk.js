@@ -103,13 +103,27 @@ router.post('/users/subscription', protect, adminOnly, async (req, res) => {
             return res.status(400).json({ message: 'ids array required' });
         }
 
-        const validPlans = ['free', 'basic', 'standard', 'premium', 'weekly'];
+        const validPlans = ['free', 'basic', 'standard', 'premium', 'weekly', 'episodes7'];
         if (!plan || !validPlans.includes(plan)) {
-            return res.status(400).json({ message: 'Invalid plan. Must be: free, basic, standard, premium, or weekly' });
+            return res.status(400).json({ message: 'Invalid manual access plan.' });
         }
 
         let subscription;
-        if (plan === 'free') {
+        if (plan === 'episodes7') {
+            const result = await User.updateMany(
+                { _id: { $in: ids } },
+                { $inc: { episodeCredits: 7 } }
+            );
+            const notifications = ids.map(userId => ({
+                userId,
+                type: 'system',
+                title: 'Episode pack added',
+                message: 'Seven episode credits have been added to your account.',
+                link: '/plans',
+            }));
+            await Notification.insertMany(notifications);
+            return res.json({ message: `7 episode credits added to ${result.modifiedCount} user(s)`, modified: result.modifiedCount });
+        } else if (plan === 'free') {
             subscription = { plan: 'free', active: false, expiresAt: null };
         } else {
             const days = Number.parseInt(durationDays, 10);
