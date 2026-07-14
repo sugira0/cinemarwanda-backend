@@ -1457,11 +1457,15 @@ router.get('/google/config', (req, res) => {
 });
 
 router.get('/google/authorize', (req, res) => {
-  const { deviceId, deviceName, origin } = req.query;
+  const { deviceId, deviceName, origin, mode, returnTo } = req.query;
   const state = Buffer.from(JSON.stringify({
     deviceId: deviceId || `web_${Date.now()}`,
     deviceName: deviceName || 'Web Browser',
     origin: origin || 'http://localhost:5173',
+    mode: mode === 'redirect' ? 'redirect' : 'popup',
+    returnTo: String(returnTo || '/who-is-watching').startsWith('/')
+      ? String(returnTo || '/who-is-watching')
+      : '/who-is-watching',
   })).toString('base64');
 
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
@@ -1478,13 +1482,31 @@ router.get('/google/callback', async (req, res) => {
   let st = { origin: 'http://localhost:5173', deviceId: `web_${Date.now()}`, deviceName: 'Web Browser' };
   try { st = { ...st, ...JSON.parse(Buffer.from(state || '', 'base64').toString()) }; } catch { }
 
-  const reply = (payload) => res.send(
-    `<!DOCTYPE html><html><body><script>` +
-    `(function(){var d=${JSON.stringify(payload)};` +
-    `if(window.opener){window.opener.postMessage(d,${JSON.stringify(st.origin)});window.close();}` +
-    `else{document.body.innerText=d.error||'Done. Close this window.';}})();` +
-    `</script></body></html>`
-  );
+  const reply = (payload) => {
+    if (st.mode === 'redirect') {
+      let frontendOrigin;
+      try {
+        const parsed = new URL(st.origin);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid protocol');
+        frontendOrigin = parsed.origin;
+      } catch {
+        frontendOrigin = process.env.FRONTEND_URL || 'https://cinemarwanda.com';
+      }
+      const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+      const returnTo = String(st.returnTo || '/who-is-watching').startsWith('/')
+        ? st.returnTo
+        : '/who-is-watching';
+      return res.redirect(`${frontendOrigin}/auth/google/complete#result=${encodeURIComponent(encoded)}&returnTo=${encodeURIComponent(returnTo)}`);
+    }
+
+    return res.send(
+      `<!DOCTYPE html><html><body><script>` +
+      `(function(){var d=${JSON.stringify(payload)};` +
+      `if(window.opener){window.opener.postMessage(d,${JSON.stringify(st.origin)});window.close();}` +
+      `else{document.body.innerText=d.error||'Done. Close this window.';}})();` +
+      `</script></body></html>`
+    );
+  };
 
   if (error) return reply({ error });
   if (!code) return reply({ error: 'No authorization code received.' });
